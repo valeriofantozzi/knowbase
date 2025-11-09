@@ -275,6 +275,215 @@ if st.button("📋 Show Video List"):
         mime="text/csv"
     )
 
+# 3D Visualization section
+st.header("🌐 3D Embedding Visualization")
+
+st.markdown("""
+Visualizza gli embeddings nello spazio 3D usando riduzione dimensionale (t-SNE/UMAP).
+Ogni punto rappresenta un chunk di testo, e i punti vicini hanno contenuti simili.
+""")
+
+col_3d1, col_3d2, col_3d3 = st.columns(3)
+
+with col_3d1:
+    num_points_3d = st.slider(
+        "Number of points to visualize:",
+        min_value=100,
+        max_value=min(2000, st.session_state.total_docs),
+        value=min(500, st.session_state.total_docs),
+        step=100
+    )
+with col_3d2:
+    reduction_method = st.selectbox(
+        "Reduction method:",
+        ["UMAP", "t-SNE"],
+        index=0
+    )
+with col_3d3:
+    color_option = st.selectbox(
+        "Color by:",
+        ["Video ID", "Date", "None"],
+        index=0
+    )
+
+st.write("")  # Spacing
+generate_3d = st.button("🎨 Generate 3D Visualization", type="primary", use_container_width=True)
+
+if generate_3d:
+    with st.spinner(f"Generating 3D visualization with {num_points_3d} points..."):
+        try:
+            # Get sample embeddings
+            # Note: 'ids' are always returned, don't include them in include parameter
+            sample_data = st.session_state.collection.get(
+                limit=num_points_3d,
+                include=['embeddings', 'metadatas', 'documents']
+            )
+            
+            # Check if embeddings exist and are not empty
+            embeddings_list = sample_data.get('embeddings')
+            # Handle both list and numpy array cases
+            if embeddings_list is None:
+                st.error("No embeddings found in database")
+            elif hasattr(embeddings_list, '__len__'):
+                if len(embeddings_list) == 0:
+                    st.error("No embeddings found in database")
+                else:
+                    embeddings = sample_data['embeddings']
+            else:
+                st.error("Invalid embeddings format")
+                embeddings = None
+            
+            if embeddings is not None:
+                metadatas = sample_data.get('metadatas', [{}] * len(embeddings))
+                documents = sample_data.get('documents', [''] * len(embeddings))
+                ids = sample_data.get('ids', [''] * len(embeddings))
+                
+                import numpy as np
+                embeddings_array = np.array(embeddings)
+                
+                # Progress bar
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                # Dimensionality reduction
+                status_text.text("Reducing dimensions...")
+                progress_bar.progress(0.3)
+                
+                if reduction_method == "UMAP":
+                    try:
+                        import umap
+                        reducer = umap.UMAP(n_components=3, random_state=42, n_neighbors=15, min_dist=0.1)
+                        reduced_embeddings = reducer.fit_transform(embeddings_array)
+                    except ImportError:
+                        st.error("UMAP not installed. Install with: pip install umap-learn")
+                        st.stop()
+                else:  # t-SNE
+                    from sklearn.manifold import TSNE
+                    status_text.text("Running t-SNE (this may take a while)...")
+                    progress_bar.progress(0.5)
+                    reducer = TSNE(n_components=3, random_state=42, perplexity=30, n_iter=1000)
+                    reduced_embeddings = reducer.fit_transform(embeddings_array)
+                
+                progress_bar.progress(0.8)
+                status_text.text("Preparing visualization...")
+                
+                # Prepare data for visualization
+                x_coords = reduced_embeddings[:, 0]
+                y_coords = reduced_embeddings[:, 1]
+                z_coords = reduced_embeddings[:, 2]
+                
+                # Create hover text
+                hover_texts = []
+                for i, (meta, doc, doc_id) in enumerate(zip(metadatas, documents, ids)):
+                    hover_parts = []
+                    if meta:
+                        if 'title' in meta:
+                            hover_parts.append(f"Title: {meta['title'][:50]}")
+                        if 'video_id' in meta:
+                            hover_parts.append(f"Video: {meta['video_id']}")
+                        if 'date' in meta:
+                            hover_parts.append(f"Date: {meta['date']}")
+                    hover_parts.append(f"Text: {doc[:100]}...")
+                    hover_texts.append("<br>".join(hover_parts))
+                
+                # Color by video_id or date (using the option selected above)
+                if color_option == "Video ID":
+                    colors = [meta.get('video_id', 'unknown') if meta else 'unknown' for meta in metadatas]
+                    color_title = "Video ID"
+                elif color_option == "Date":
+                    colors = [meta.get('date', 'unknown') if meta else 'unknown' for meta in metadatas]
+                    color_title = "Date"
+                else:
+                    colors = None
+                    color_title = None
+                
+                # Create color mapping for categorical data
+                if colors and color_option != "None":
+                    # Convert categorical to numeric for colorscale
+                    unique_colors = list(set(colors))
+                    color_map = {color: i for i, color in enumerate(unique_colors)}
+                    numeric_colors = [color_map[c] for c in colors]
+                    colorscale = 'Viridis'
+                    colorbar_title = color_option
+                else:
+                    numeric_colors = None
+                    colorscale = None
+                    colorbar_title = None
+                
+                # Create 3D scatter plot
+                fig = go.Figure(data=go.Scatter3d(
+                    x=x_coords,
+                    y=y_coords,
+                    z=z_coords,
+                    mode='markers',
+                    marker=dict(
+                        size=5,
+                        color=numeric_colors if numeric_colors is not None else 'blue',
+                        colorscale=colorscale if colorscale else None,
+                        opacity=0.7,
+                        line=dict(width=0.5, color='white'),
+                        colorbar=dict(title=colorbar_title) if colorbar_title else None,
+                        showscale=(colorbar_title is not None)
+                    ),
+                    text=hover_texts,
+                    hovertemplate='<b>%{text}</b><extra></extra>',
+                    name='Embeddings'
+                ))
+                
+                fig.update_layout(
+                    title=f"3D Embedding Space ({reduction_method}) - {num_points_3d} points",
+                    scene=dict(
+                        xaxis_title="Dimension 1",
+                        yaxis_title="Dimension 2",
+                        zaxis_title="Dimension 3",
+                        bgcolor='rgba(0,0,0,0)',
+                        xaxis=dict(backgroundcolor='rgba(0,0,0,0)'),
+                        yaxis=dict(backgroundcolor='rgba(0,0,0,0)'),
+                        zaxis=dict(backgroundcolor='rgba(0,0,0,0)'),
+                    ),
+                    width=1000,
+                    height=800,
+                    margin=dict(l=0, r=0, b=0, t=50)
+                )
+                
+                progress_bar.progress(1.0)
+                status_text.text("Visualization ready!")
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Statistics
+                st.subheader("📊 3D Visualization Statistics")
+                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                with col_stat1:
+                    st.metric("Points visualized", num_points_3d)
+                with col_stat2:
+                    st.metric("Original dimensions", embeddings_array.shape[1])
+                with col_stat3:
+                    st.metric("Reduced dimensions", 3)
+                
+                # Download coordinates
+                coords_df = pd.DataFrame({
+                    'ID': ids,
+                    'X': x_coords,
+                    'Y': y_coords,
+                    'Z': z_coords,
+                    'Video ID': [m.get('video_id', '') if m else '' for m in metadatas],
+                    'Title': [m.get('title', '') if m else '' for m in metadatas],
+                    'Date': [m.get('date', '') if m else '' for m in metadatas]
+                })
+                
+                csv_coords = coords_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download 3D Coordinates (CSV)",
+                    data=csv_coords,
+                    file_name="embedding_3d_coordinates.csv",
+                    mime="text/csv"
+                )
+        
+        except Exception as e:
+            st.error(f"Error generating 3D visualization: {e}")
+            st.exception(e)
+
 # Footer
 st.markdown("---")
 st.markdown("**Vector Database Explorer** | Powered by ChromaDB & BGE Embeddings")
