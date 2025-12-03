@@ -23,6 +23,7 @@ from src.ui.pages import (
     render_load_documents_page,
     render_postprocessing_page,
     render_search_page,
+    render_ai_search_page,
 )
 from src.vector_store.chroma_manager import ChromaDBManager
 
@@ -76,6 +77,7 @@ def render_sidebar() -> str:
             f"{ICONS['load']} Load Documents",
             f"{ICONS['analysis']} PostProcessing",
             f"{ICONS['search']} Search",
+            "🤖 AI Search",
         ],
         label_visibility="collapsed",
         key="nav_radio"
@@ -134,13 +136,15 @@ def main():
         render_postprocessing_page()
     elif f"{ICONS['search']} Search" in selected_page:
         render_search_page()
+    elif "🤖 AI Search" in selected_page:
+        render_ai_search_page()
     
     # Footer
-    st.markdown("---")
-    st.markdown(
-        f"**{ICONS['database']} Vector Database Explorer** | "
-        "Powered by ChromaDB & Sentence Transformers"
-    )
+    # st.markdown("---")
+    # st.markdown(
+    #     f"**{ICONS['database']} Vector Database Explorer** | "
+    #     "Powered by ChromaDB & Sentence Transformers"
+    # )
 
 
 if __name__ == "__main__":

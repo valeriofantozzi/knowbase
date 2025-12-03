@@ -39,6 +39,10 @@ class Config:
             os.getenv("MODEL_CACHE_DIR", "~/.cache/huggingface")
         )
         
+        # LLM Configuration
+        self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+        self.LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gpt-3.5-turbo")
+        
         # Processing Configuration
         # Batch size will be auto-optimized if not explicitly set
         batch_size_env = os.getenv("BATCH_SIZE")

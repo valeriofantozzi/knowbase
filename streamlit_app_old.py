@@ -521,6 +521,6 @@ elif page == "🌐 3D View":
                 st.error(f"Error generating 3D visualization: {e}")
                 st.exception(e)
 
-# Footer
-st.markdown("---")
-st.markdown("**Vector Database Explorer** | Powered by ChromaDB & BGE Embeddings")
+# # Footer
+# st.markdown("---")
+# st.markdown("**Vector Database Explorer** | Powered by ChromaDB & BGE Embeddings")

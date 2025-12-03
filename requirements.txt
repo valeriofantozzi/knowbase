@@ -46,3 +46,9 @@ hdbscan>=0.8.33
 
 # Universal document parser
 docling>=2.0.0
+
+# AI / RAG Dependencies
+langchain>=0.1.0
+langgraph>=0.0.10
+langchain-openai>=0.0.5
+langchain-community>=0.0.10

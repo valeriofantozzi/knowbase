@@ -228,7 +228,7 @@ class ChromaDBManager:
             collection_name = self._generate_collection_name(model_name)
         else:
             collection_name = name or self.collection_name
-
+            
         # Determine embedding dimension
         if embedding_dimension is None:
             if model_name is not None:

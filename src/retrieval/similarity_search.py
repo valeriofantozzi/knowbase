@@ -14,6 +14,7 @@ from ..embeddings.embedder import Embedder
 from ..vector_store.chroma_manager import ChromaDBManager
 from ..vector_store.schema import ChunkMetadata, chromadb_metadata_to_schema
 from ..utils.logger import get_default_logger
+from ..utils.config import get_config
 
 
 @dataclass
@@ -102,7 +103,14 @@ class SimilaritySearch:
         """
         self.chroma_manager = chroma_manager or ChromaDBManager()
         self.embedder = embedder or Embedder()
-        self.model_name = model_name
+        
+        # Use configured model name if not provided
+        if model_name is None:
+            config = get_config()
+            self.model_name = config.MODEL_NAME
+        else:
+            self.model_name = model_name
+            
         self.logger = get_default_logger()
 
         # Ensure collection is initialized

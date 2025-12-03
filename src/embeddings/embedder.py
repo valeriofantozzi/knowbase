@@ -36,6 +36,11 @@ class Embedder:
         # (it gets created when the model is loaded)
     
     @property
+    def model_name(self) -> str:
+        """Get model name."""
+        return self.model_loader.model_name
+
+    @property
     def model(self) -> SentenceTransformer:
         """Get model (lazy loading)."""
         if self._model is None:
