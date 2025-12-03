@@ -33,7 +33,7 @@ st.set_page_config(
     page_title="Vector DB Explorer",
     page_icon="🔍",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 
@@ -71,7 +71,7 @@ def render_sidebar() -> str:
     st.sidebar.markdown("---")
     
     # Determine default index from query params
-    default_index = 0
+    default_index = 3  # Default to AI Search tab
     try:
         # Try new API first
         params = st.query_params
@@ -86,6 +86,12 @@ def render_sidebar() -> str:
             
     if page_param == "ai_search":
         default_index = 3
+    elif page_param == "load_documents":
+        default_index = 0
+    elif page_param == "postprocessing":
+        default_index = 1
+    elif page_param == "search":
+        default_index = 2
     
     # Navigation
     page = st.sidebar.radio(

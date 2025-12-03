@@ -41,7 +41,51 @@ class Config:
         
         # LLM Configuration
         self.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-        self.LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gpt-3.5-turbo")
+        
+        # ==========================================
+        # AI SEARCH AGENTS CONFIGURATION
+        # ==========================================
+        # Query Analyzer Agent
+        self.AI_QUERY_ANALYZER_PROVIDER = os.getenv("AI_QUERY_ANALYZER_PROVIDER", "openai")
+        self.AI_QUERY_ANALYZER_MODEL = os.getenv("AI_QUERY_ANALYZER_MODEL", "gpt-4-mini")
+        self.AI_QUERY_ANALYZER_TEMPERATURE = float(os.getenv("AI_QUERY_ANALYZER_TEMPERATURE", "0.3"))
+        self.AI_QUERY_ANALYZER_MAX_TOKENS = self._get_int("AI_QUERY_ANALYZER_MAX_TOKENS", 500)
+        self.AI_QUERY_ANALYZER_API_KEY = os.getenv("AI_QUERY_ANALYZER_API_KEY", self.OPENAI_API_KEY)
+        
+        # Clarification Agent
+        self.AI_CLARIFICATION_PROVIDER = os.getenv("AI_CLARIFICATION_PROVIDER", "openai")
+        self.AI_CLARIFICATION_MODEL = os.getenv("AI_CLARIFICATION_MODEL", "gpt-3.5-turbo")
+        self.AI_CLARIFICATION_TEMPERATURE = float(os.getenv("AI_CLARIFICATION_TEMPERATURE", "0.7"))
+        self.AI_CLARIFICATION_MAX_TOKENS = self._get_int("AI_CLARIFICATION_MAX_TOKENS", 800)
+        self.AI_CLARIFICATION_API_KEY = os.getenv("AI_CLARIFICATION_API_KEY", self.OPENAI_API_KEY)
+        
+        # Query Rewriter Agent
+        self.AI_QUERY_REWRITER_PROVIDER = os.getenv("AI_QUERY_REWRITER_PROVIDER", "openai")
+        self.AI_QUERY_REWRITER_MODEL = os.getenv("AI_QUERY_REWRITER_MODEL", "gpt-3.5-turbo")
+        self.AI_QUERY_REWRITER_TEMPERATURE = float(os.getenv("AI_QUERY_REWRITER_TEMPERATURE", "0.3"))
+        self.AI_QUERY_REWRITER_MAX_TOKENS = self._get_int("AI_QUERY_REWRITER_MAX_TOKENS", 300)
+        self.AI_QUERY_REWRITER_API_KEY = os.getenv("AI_QUERY_REWRITER_API_KEY", self.OPENAI_API_KEY)
+        
+        # RAG Response Generator Agent
+        self.AI_RAG_GENERATOR_PROVIDER = os.getenv("AI_RAG_GENERATOR_PROVIDER", "openai")
+        self.AI_RAG_GENERATOR_MODEL = os.getenv("AI_RAG_GENERATOR_MODEL", "gpt-4")
+        self.AI_RAG_GENERATOR_TEMPERATURE = float(os.getenv("AI_RAG_GENERATOR_TEMPERATURE", "0.2"))
+        self.AI_RAG_GENERATOR_MAX_TOKENS = self._get_int("AI_RAG_GENERATOR_MAX_TOKENS", 500)
+        self.AI_RAG_GENERATOR_API_KEY = os.getenv("AI_RAG_GENERATOR_API_KEY", self.OPENAI_API_KEY)
+        
+        # Alternative Provider Keys
+        self.ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+        self.GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+        self.AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+        self.AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+        self.AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
+        self.OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        self.OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "mistral")
+        
+        # Agent Behavior Configuration
+        self.AI_QUERY_CLARITY_THRESHOLD = float(os.getenv("AI_QUERY_CLARITY_THRESHOLD", "0.85"))
+        self.AI_MAX_SUGGESTED_QUERIES = self._get_int("AI_MAX_SUGGESTED_QUERIES", 5)
+        self.AI_CONVERSATION_WINDOW = self._get_int("AI_CONVERSATION_WINDOW", 10)
         
         # Processing Configuration
         # Batch size will be auto-optimized if not explicitly set

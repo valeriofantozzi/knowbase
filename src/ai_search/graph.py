@@ -9,9 +9,13 @@ from src.ai_search.chains import (
 )
 from src.retrieval.query_engine import QueryEngine
 from src.retrieval.similarity_search import SearchResult
+from src.utils.config import Config
+
+# Load configuration
+config = Config()
 
 # Confidence threshold below which we ask for clarification
-CLARITY_THRESHOLD = 0.85
+CLARITY_THRESHOLD = config.AI_QUERY_CLARITY_THRESHOLD
 
 
 def format_docs(docs: List[SearchResult]) -> str:

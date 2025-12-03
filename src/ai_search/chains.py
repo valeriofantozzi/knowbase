@@ -2,16 +2,19 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from src.utils.config import Config
+from src.ai_search.llm_factory import LLMFactory
 
 # Initialize Config
 config = Config()
 
-# Initialize LLM
-llm = ChatOpenAI(
-    model=config.LLM_MODEL_NAME,
-    temperature=0,
-    api_key=config.OPENAI_API_KEY
-)
+# Initialize Factory
+LLMFactory.initialize(config)
+
+# Initialize LLMs for each agent with their specific configuration
+llm_query_analyzer = LLMFactory.create_query_analyzer_llm()
+llm_clarification = LLMFactory.create_clarification_llm()
+llm_query_rewriter = LLMFactory.create_query_rewriter_llm()
+llm_rag_generator = LLMFactory.create_rag_generator_llm()
 
 # --- Query Analyzer Chain ---
 query_analyzer_system_prompt = """You are an expert query analyzer. Your task is to evaluate if a user's question is clear and specific enough to search a knowledge base effectively.
@@ -64,7 +67,7 @@ query_analyzer_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-query_analyzer_chain = query_analyzer_prompt | llm | JsonOutputParser()
+query_analyzer_chain = query_analyzer_prompt | llm_query_analyzer | JsonOutputParser()
 
 
 # --- Query Rewriter Chain ---
@@ -80,7 +83,7 @@ rephrase_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-query_rewriter_chain = rephrase_prompt | llm | StrOutputParser()
+query_rewriter_chain = rephrase_prompt | llm_query_rewriter | StrOutputParser()
 
 
 # --- Clarification Response Generator Chain ---
@@ -109,7 +112,7 @@ clarification_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-clarification_chain = clarification_prompt | llm | StrOutputParser()
+clarification_chain = clarification_prompt | llm_clarification | StrOutputParser()
 
 
 # --- RAG Generator Chain ---
@@ -130,4 +133,4 @@ rag_prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-rag_chain = rag_prompt | llm | StrOutputParser()
+rag_chain = rag_prompt | llm_rag_generator | StrOutputParser()
