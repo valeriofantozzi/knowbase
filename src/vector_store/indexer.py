@@ -53,18 +53,20 @@ class Indexer:
         embeddings: np.ndarray,
         video_metadata: Dict[str, Any],
         batch_size: int = 1000,
-        show_progress: bool = True
+        show_progress: bool = True,
+        collection: Optional[Any] = None
     ) -> int:
         """
         Index chunks with their embeddings.
-        
+
         Args:
             chunks: List of chunk objects
             embeddings: Embeddings array (shape: [num_chunks, embedding_dim])
             video_metadata: Video metadata dictionary
             batch_size: Batch size for indexing
             show_progress: Show progress bar
-        
+            collection: Optional collection to use (uses default if None)
+
         Returns:
             Number of chunks indexed
         """
@@ -108,7 +110,8 @@ class Indexer:
             metadatas=metadatas,
             documents=documents,
             batch_size=batch_size,
-            show_progress=show_progress
+            show_progress=show_progress,
+            collection=collection
         )
         
         self.logger.info(f"Indexed {indexed_count} chunks")
@@ -121,11 +124,12 @@ class Indexer:
         metadatas: List[Dict],
         documents: List[str],
         batch_size: int = 1000,
-        show_progress: bool = True
+        show_progress: bool = True,
+        collection: Optional[Any] = None
     ) -> int:
         """
         Index data in batches.
-        
+
         Args:
             ids: List of document IDs
             embeddings: Embeddings array
@@ -133,11 +137,12 @@ class Indexer:
             documents: List of document texts
             batch_size: Batch size
             show_progress: Show progress bar
-        
+            collection: Optional collection to use (uses default if None)
+
         Returns:
             Number of documents indexed
         """
-        collection = self.collection
+        collection = collection or self.collection
         total = len(ids)
         indexed = 0
         

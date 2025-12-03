@@ -1,7 +1,7 @@
 """
 Embedder Module
 
-Generates embeddings from text chunks.
+Generates embeddings from text chunks using model adapters.
 """
 
 import numpy as np
@@ -13,14 +13,8 @@ from ..utils.logger import get_default_logger
 
 
 class Embedder:
-    """Generates embeddings from text."""
-    
-    # Instruction prefix for queries (BGE models support instruction-based queries)
-    QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
-    
-    # Instruction prefix for documents (optional, can be empty)
-    DOCUMENT_INSTRUCTION = ""
-    
+    """Generates embeddings from text using model-specific adapters."""
+
     def __init__(
         self,
         model_loader: Optional[ModelLoader] = None,
@@ -28,15 +22,18 @@ class Embedder:
     ):
         """
         Initialize embedder.
-        
+
         Args:
             model_loader: ModelLoader instance (creates new if None)
-            normalize_embeddings: Whether to normalize embeddings (BGE models use normalized embeddings)
+            normalize_embeddings: Whether to normalize embeddings
         """
         self.model_loader = model_loader or get_model_loader()
         self.normalize_embeddings = normalize_embeddings
         self.logger = get_default_logger()
         self._model: Optional[SentenceTransformer] = None
+
+        # Adapter will be accessed dynamically from model_loader
+        # (it gets created when the model is loaded)
     
     @property
     def model(self) -> SentenceTransformer:
@@ -74,11 +71,13 @@ class Embedder:
         # Validate inputs
         self._validate_inputs(texts)
         
-        # Prepare texts with instruction prefix if needed
+        # Prepare texts with model-specific prompt formatting
+        # Ensure model is loaded before accessing adapter
+        _ = self.model  # Trigger lazy loading
         if is_query:
-            texts = [self.QUERY_INSTRUCTION + text for text in texts]
-        elif self.DOCUMENT_INSTRUCTION:
-            texts = [self.DOCUMENT_INSTRUCTION + text for text in texts]
+            texts = [self.model_loader.adapter.format_query_prompt(text) for text in texts]
+        else:
+            texts = [self.model_loader.adapter.format_document_prompt(text) for text in texts]
         
         # Get batch size from config if not provided
         if batch_size is None:
@@ -137,7 +136,9 @@ class Embedder:
             self.logger.warning(f"Found {len(empty_texts)} empty texts at indices: {empty_texts[:10]}")
         
         # Check text length (warn if very long)
-        max_length = self.model.max_seq_length
+        # Ensure model is loaded before accessing adapter
+        _ = self.model  # Trigger lazy loading
+        max_length = self.model_loader.adapter.get_max_sequence_length()
         long_texts = []
         for i, text in enumerate(texts):
             # Rough token estimate (words)
@@ -176,7 +177,9 @@ class Embedder:
             )
         
         # Check embedding dimension
-        expected_dim = self.model.get_sentence_embedding_dimension()
+        # Ensure model is loaded before accessing adapter
+        _ = self.model  # Trigger lazy loading
+        expected_dim = self.model_loader.adapter.get_embedding_dimension()
         if embeddings.shape[-1] != expected_dim:
             raise ValueError(
                 f"Wrong embedding dimension: expected {expected_dim}, "
@@ -196,17 +199,36 @@ class Embedder:
     def get_embedding_dimension(self) -> int:
         """
         Get embedding dimension.
-        
+
         Returns:
             Embedding dimension
         """
-        return self.model.get_sentence_embedding_dimension()
-    
+        # Ensure model is loaded before accessing adapter
+        _ = self.model  # Trigger lazy loading
+        return self.model_loader.adapter.get_embedding_dimension()
+
     def get_max_sequence_length(self) -> int:
         """
         Get maximum sequence length.
-        
+
         Returns:
             Maximum sequence length in tokens
         """
-        return self.model.max_seq_length
+        # Ensure model is loaded before accessing adapter
+        _ = self.model  # Trigger lazy loading
+        return self.model_loader.adapter.get_max_sequence_length()
+
+    def set_model(self, model_name: str) -> None:
+        """
+        Set the embedding model to use.
+
+        Args:
+            model_name: Name of the embedding model to use
+        """
+        # Create new model loader with the specified model
+        self.model_loader = get_model_loader(model_name=model_name)
+
+        # Reset cached model so it will be reloaded
+        self._model = None
+
+        self.logger.info(f"Switched embedder to model: {model_name}")

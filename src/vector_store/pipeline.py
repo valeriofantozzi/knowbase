@@ -14,6 +14,7 @@ from .schema import ChunkMetadata, chromadb_metadata_to_schema
 from ..preprocessing.pipeline import ProcessedVideo
 from ..embeddings.pipeline import EmbeddingPipeline
 from ..embeddings.embedder import Embedder
+from ..embeddings.model_registry import get_model_registry
 from ..utils.logger import get_default_logger
 from ..utils.config import get_config
 
@@ -24,18 +25,21 @@ class VectorStorePipeline:
     def __init__(
         self,
         db_path: Optional[str] = None,
-        collection_name: Optional[str] = None
+        collection_name: Optional[str] = None,
+        model_name: Optional[str] = None
     ):
         """
         Initialize vector store pipeline.
-        
+
         Args:
             db_path: Path to ChromaDB database (default from config)
             collection_name: Collection name (default from config)
+            model_name: Embedding model name (default from config)
         """
         self.config = get_config()
         self.logger = get_default_logger()
-        
+        self.model_name = model_name
+
         # Initialize components
         self.chroma_manager = ChromaDBManager(
             db_path=db_path,
@@ -48,17 +52,19 @@ class VectorStorePipeline:
         processed_video: ProcessedVideo,
         embeddings: np.ndarray,
         skip_duplicates: bool = True,
-        show_progress: bool = True
+        show_progress: bool = True,
+        model_name: Optional[str] = None
     ) -> int:
         """
         Index a processed video with embeddings.
-        
+
         Args:
             processed_video: ProcessedVideo object
             embeddings: Embeddings array for chunks
             skip_duplicates: Skip chunks that already exist
             show_progress: Show progress bar
-        
+            model_name: Actual model name used to generate embeddings (for validation)
+
         Returns:
             Number of chunks indexed
         """
@@ -108,12 +114,22 @@ class VectorStorePipeline:
                 processed_video.chunks = filtered_chunks
                 embeddings = np.array(filtered_embeddings)
         
+        # Validate embedding dimensions before indexing
+        validation_model_name = model_name or self.model_name
+        self._validate_embedding_dimensions(embeddings, validation_model_name)
+
+        # Get or create collection with model-specific name
+        collection = self.chroma_manager.get_or_create_collection(
+            model_name=validation_model_name
+        )
+
         # Index chunks
         indexed_count = self.indexer.index_chunks(
             chunks=processed_video.chunks,
             embeddings=embeddings,
             video_metadata=video_metadata,
-            show_progress=show_progress
+            show_progress=show_progress,
+            collection=collection
         )
         
         self.logger.info(
@@ -395,6 +411,61 @@ class VectorStorePipeline:
         else:
             results["status"] = "warning"
             self.logger.warning("Index verification completed with warnings")
-        
+
         return results
+
+    def _validate_embedding_dimensions(self, embeddings: np.ndarray, model_name: str) -> None:
+        """
+        Validate that embedding dimensions match the expected dimensions for the model.
+
+        Args:
+            embeddings: Embedding array to validate
+            model_name: Name of the model used to generate embeddings
+
+        Raises:
+            ValueError: If embedding dimensions don't match model expectations
+        """
+        try:
+            # Get expected dimension from model registry
+            registry = get_model_registry()
+            metadata = registry.get_model_metadata(model_name)
+
+            if metadata:
+                expected_dim = metadata.embedding_dimension
+            else:
+                # Fallback to config
+                config = get_config()
+                expected_dim = config.get_embedding_dimension()
+
+            # Check embedding shape
+            if embeddings.ndim != 2:
+                raise ValueError(
+                    f"Embeddings must be 2D array, got {embeddings.ndim}D with shape {embeddings.shape}"
+                )
+
+            actual_dim = embeddings.shape[1]  # Second dimension is embedding size
+
+            if actual_dim != expected_dim:
+                raise ValueError(
+                    f"Embedding dimension mismatch for model '{model_name}': "
+                    f"expected {expected_dim}, got {actual_dim}. "
+                    f"This usually indicates the embeddings were generated with a different model. "
+                    f"Please ensure you're using the correct model for generating embeddings."
+                )
+
+            # Check for reasonable embedding values
+            if np.isnan(embeddings).any():
+                raise ValueError("Embeddings contain NaN values")
+
+            if not np.isfinite(embeddings).all():
+                raise ValueError("Embeddings contain infinite values")
+
+            self.logger.debug(
+                f"Embedding validation passed: {embeddings.shape[0]} embeddings, "
+                f"{actual_dim} dimensions for model '{model_name}'"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Embedding dimension validation failed: {e}")
+            raise
 

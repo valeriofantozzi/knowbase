@@ -33,21 +33,24 @@ class QueryEngine:
         self,
         similarity_search: Optional[SimilaritySearch] = None,
         enable_caching: bool = True,
-        cache_size: int = 100
+        cache_size: int = 100,
+        model_name: Optional[str] = None
     ):
         """
         Initialize query engine.
-        
+
         Args:
             similarity_search: SimilaritySearch instance (creates new if None)
             enable_caching: Whether to enable query caching
             cache_size: Maximum number of cached queries
+            model_name: Embedding model name (uses config default if None)
         """
-        self.similarity_search = similarity_search or SimilaritySearch()
+        self.similarity_search = similarity_search or SimilaritySearch(model_name=model_name)
         self.enable_caching = enable_caching
         self.cache_size = cache_size
+        self.model_name = model_name
         self.logger = get_default_logger()
-        
+
         # Simple in-memory cache (query_hash -> results)
         self._cache: Dict[str, List[SearchResult]] = {}
     
@@ -86,7 +89,8 @@ class QueryEngine:
                 processed_query,
                 top_k,
                 score_threshold,
-                filters
+                filters,
+                self.model_name
             )
             
             if cache_key in self._cache:
@@ -109,7 +113,8 @@ class QueryEngine:
                 processed_query,
                 top_k,
                 score_threshold,
-                filters
+                filters,
+                self.model_name
             )
             self._cache_result(cache_key, results)
         
@@ -212,17 +217,19 @@ class QueryEngine:
         query: str,
         top_k: int,
         score_threshold: Optional[float],
-        filters: Optional[SearchFilters]
+        filters: Optional[SearchFilters],
+        model_name: Optional[str] = None
     ) -> str:
         """
         Generate cache key for query.
-        
+
         Args:
             query: Processed query string
             top_k: Number of results
             score_threshold: Minimum similarity score
             filters: SearchFilters object
-        
+            model_name: Model name for the query
+
         Returns:
             Cache key string (hash)
         """
@@ -231,6 +238,7 @@ class QueryEngine:
             "query": query.lower(),  # Case-insensitive
             "top_k": top_k,
             "score_threshold": score_threshold,
+            "model_name": model_name or self.model_name,
         }
         
         # Add filter parameters if present
@@ -308,3 +316,22 @@ class QueryEngine:
             include_metadata=options.include_metadata,
             filters=options.filters
         )
+
+    def set_model(self, model_name: str) -> None:
+        """
+        Set the embedding model to use for queries.
+
+        Args:
+            model_name: Name of the embedding model to use
+        """
+        if self.model_name != model_name:
+            self.model_name = model_name
+            # Update similarity search with new model
+            self.similarity_search = SimilaritySearch(
+                chroma_manager=self.similarity_search.chroma_manager,
+                embedder=self.similarity_search.embedder,
+                model_name=model_name
+            )
+            # Clear cache since results will be different with new model
+            self.clear_cache()
+            self.logger.info(f"Switched to model: {model_name}")

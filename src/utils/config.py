@@ -2,11 +2,12 @@
 Configuration Module
 
 Manages application configuration with environment variable support and validation.
+Includes model selection and validation for multi-model embedding support.
 """
 
 import os
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Optional, Literal, Dict, Any
 from dotenv import load_dotenv
 
 
@@ -118,6 +119,9 @@ class Config:
         
         # Validate configuration
         self._validate()
+
+        # Validate model configuration
+        self._validate_model()
     
     def _get_int(self, key: str, default: int) -> int:
         """Get integer environment variable."""
@@ -175,10 +179,73 @@ class Config:
             raise ValueError(
                 f"CHECKPOINT_INTERVAL must be >= 1, got {self.CHECKPOINT_INTERVAL}"
             )
+
+    def _validate_model(self) -> None:
+        """
+        Validate model configuration against ModelRegistry.
+
+        Logs warnings for unknown models but allows them to continue with generic adapter.
+        """
+        try:
+            from ..embeddings.model_registry import get_model_registry
+            registry = get_model_registry()
+
+            # Check if model is registered
+            if not registry.is_registered(self.MODEL_NAME):
+                from ..utils.logger import get_default_logger
+                logger = get_default_logger()
+                logger.warning(
+                    f"Model '{self.MODEL_NAME}' is not in the registered models list. "
+                    "It will use a generic adapter fallback. "
+                    f"Registered models: {registry.get_registered_models()}"
+                )
+            else:
+                # Validate model name format (basic check)
+                if not self.MODEL_NAME or not isinstance(self.MODEL_NAME, str):
+                    raise ValueError(f"Invalid MODEL_NAME: {self.MODEL_NAME}. Must be a non-empty string.")
+
+        except ImportError as e:
+            # Graceful degradation if model registry is not available
+            from ..utils.logger import get_default_logger
+            logger = get_default_logger()
+            logger.debug(f"Model registry not available for validation: {e}")
+        except Exception as e:
+            # Log validation errors but don't fail initialization
+            from ..utils.logger import get_default_logger
+            logger = get_default_logger()
+            logger.warning(f"Model validation failed: {e}. Using model as-is.")
+
+    def get_model_metadata(self) -> Optional[Dict[str, Any]]:
+        """
+        Get metadata for the configured model from ModelRegistry.
+
+        Returns:
+            Model metadata dictionary or None if not available
+        """
+        try:
+            from ..embeddings.model_registry import get_model_registry
+            registry = get_model_registry()
+            return registry.get_model_metadata(self.MODEL_NAME)
+        except Exception:
+            return None
+
+    def get_embedding_dimension(self) -> int:
+        """
+        Get embedding dimension for the configured model.
+
+        Returns:
+            Embedding dimension (default: 1024 for backward compatibility)
+        """
+        metadata = self.get_model_metadata()
+        if metadata:
+            return metadata.embedding_dimension
+
+        # Fallback for backward compatibility
+        return 1024
     
     def to_dict(self) -> dict:
         """Convert configuration to dictionary."""
-        return {
+        config_dict = {
             "MODEL_NAME": self.MODEL_NAME,
             "MODEL_CACHE_DIR": self.MODEL_CACHE_DIR,
             "BATCH_SIZE": self.BATCH_SIZE,
@@ -195,10 +262,23 @@ class Config:
             "ENABLE_CHECKPOINTING": self.ENABLE_CHECKPOINTING,
             "CHECKPOINT_INTERVAL": self.CHECKPOINT_INTERVAL,
         }
+
+        # Add model metadata if available
+        metadata = self.get_model_metadata()
+        if metadata:
+            config_dict["MODEL_METADATA"] = {
+                "embedding_dimension": metadata.embedding_dimension,
+                "max_sequence_length": metadata.max_sequence_length,
+                "precision_requirements": metadata.precision_requirements,
+                "adapter_class": metadata.adapter_class.__name__,
+            }
+
+        return config_dict
     
     def __repr__(self) -> str:
         """String representation of configuration."""
-        return f"Config(device={self.DEVICE}, model={self.MODEL_NAME}, batch_size={self.BATCH_SIZE})"
+        dim = self.get_embedding_dimension()
+        return f"Config(device={self.DEVICE}, model={self.MODEL_NAME}, dim={dim}, batch_size={self.BATCH_SIZE})"
 
 
 # Global configuration instance

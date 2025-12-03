@@ -83,19 +83,22 @@ class SimilaritySearch:
     def __init__(
         self,
         chroma_manager: Optional[ChromaDBManager] = None,
-        embedder: Optional[Embedder] = None
+        embedder: Optional[Embedder] = None,
+        model_name: Optional[str] = None
     ):
         """
         Initialize similarity search.
-        
+
         Args:
             chroma_manager: ChromaDBManager instance (creates new if None)
             embedder: Embedder instance (creates new if None)
+            model_name: Embedding model name (uses config default if None)
         """
         self.chroma_manager = chroma_manager or ChromaDBManager()
         self.embedder = embedder or Embedder()
+        self.model_name = model_name
         self.logger = get_default_logger()
-        
+
         # Ensure collection is initialized
         self._collection = None
     
@@ -103,7 +106,7 @@ class SimilaritySearch:
     def collection(self):
         """Get ChromaDB collection (lazy initialization)."""
         if self._collection is None:
-            self._collection = self.chroma_manager.get_or_create_collection()
+            self._collection = self.chroma_manager.get_or_create_collection(model_name=self.model_name)
         return self._collection
     
     def search(
@@ -141,7 +144,10 @@ class SimilaritySearch:
         try:
             # Generate query embedding
             query_embedding = self.embedder.encode_single(query, is_query=True)
-            
+
+            # Validate query embedding dimensions
+            self._validate_query_embedding(query_embedding)
+
             # Build ChromaDB query parameters
             query_params = {
                 "query_embeddings": [query_embedding.tolist()],
@@ -294,9 +300,12 @@ class SimilaritySearch:
         
         if top_k < 1:
             raise ValueError(f"top_k must be >= 1, got {top_k}")
-        
+
+        # Validate query embedding
+        self._validate_query_embedding(query_embedding)
+
         self.logger.debug(f"Searching by embedding (top_k={top_k}, threshold={score_threshold})")
-        
+
         try:
             # Build ChromaDB query parameters
             query_params = {
@@ -379,8 +388,81 @@ class SimilaritySearch:
     def get_collection_stats(self) -> Dict[str, Any]:
         """
         Get statistics about the collection.
-        
+
         Returns:
             Dictionary with collection statistics
         """
         return self.chroma_manager.get_collection_stats()
+
+    def set_model(self, model_name: str) -> None:
+        """
+        Set the embedding model to use for search.
+
+        Args:
+            model_name: Name of the embedding model to use
+        """
+        if self.model_name != model_name:
+            self.model_name = model_name
+
+            # Update embedder with new model
+            self.embedder.set_model(model_name)
+
+            # Reset collection so it will be reloaded with new model
+            self._collection = None
+
+            self.logger.info(f"Switched similarity search to model: {model_name}")
+
+    def _validate_query_embedding(self, embedding: np.ndarray) -> None:
+        """
+        Validate query embedding dimensions and values.
+
+        Args:
+            embedding: Query embedding array
+
+        Raises:
+            ValueError: If embedding validation fails
+        """
+        # Get expected dimension from model
+        model_name = self.model_name or self.embedder.model_name
+        try:
+            registry = get_model_registry()
+            metadata = registry.get_model_metadata(model_name)
+
+            if metadata:
+                expected_dim = metadata.embedding_dimension
+            else:
+                # Fallback to embedder dimension
+                expected_dim = self.embedder.get_embedding_dimension()
+
+        except Exception:
+            # Final fallback - just check if it's a reasonable vector
+            expected_dim = None
+
+        # Basic validation
+        if embedding.ndim != 1:
+            raise ValueError(
+                f"Query embedding must be 1D array, got {embedding.ndim}D with shape {embedding.shape}"
+            )
+
+        if len(embedding) == 0:
+            raise ValueError("Query embedding is empty")
+
+        # Check dimension if we know what to expect
+        if expected_dim is not None and len(embedding) != expected_dim:
+            raise ValueError(
+                f"Query embedding dimension mismatch: expected {expected_dim} for model '{model_name}', "
+                f"got {len(embedding)}. "
+                f"This suggests you're using the wrong model for querying. "
+                f"Please ensure the query model matches the indexing model."
+            )
+
+        # Check for invalid values
+        if np.isnan(embedding).any():
+            raise ValueError("Query embedding contains NaN values")
+
+        if not np.isfinite(embedding).all():
+            raise ValueError("Query embedding contains infinite values")
+
+        self.logger.debug(
+            f"Query embedding validation passed: {len(embedding)} dimensions"
+        )

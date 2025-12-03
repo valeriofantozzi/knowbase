@@ -7,6 +7,7 @@ Processes all SRT files, generates embeddings, and indexes them in the vector st
 
 import argparse
 import sys
+import glob
 from pathlib import Path
 from typing import List, Optional
 from rich.console import Console
@@ -24,10 +25,13 @@ from src.utils.logger import get_default_logger
 from src.utils.config import get_config
 
 
-def find_srt_files(input_dir: Path) -> List[Path]:
+def find_srt_files(input_dir: Path, max_files: Optional[int] = None) -> List[Path]:
     """Find all SRT files in the input directory."""
     srt_files = list(input_dir.rglob("*.srt"))
-    return sorted(srt_files)
+    srt_files = sorted(srt_files)
+    if max_files is not None:
+        srt_files = srt_files[:max_files]
+    return srt_files
 
 
 def process_pipeline(
@@ -36,11 +40,13 @@ def process_pipeline(
     parallel_preprocessing: bool = True,
     max_workers: Optional[int] = None,
     batch_size: Optional[int] = None,
-    show_progress: bool = True
+    show_progress: bool = True,
+    model_name: Optional[str] = None,
+    max_files: Optional[int] = None
 ) -> dict:
     """
     Run the complete pipeline: preprocessing -> embeddings -> indexing.
-    
+
     Args:
         input_dir: Directory containing SRT files
         skip_processed: Skip videos that are already indexed
@@ -48,7 +54,8 @@ def process_pipeline(
         max_workers: Max workers for parallel processing
         batch_size: Batch size for embedding generation
         show_progress: Show progress bars
-    
+        model_name: Embedding model name (None uses config default)
+
     Returns:
         Dictionary with processing statistics
     """
@@ -58,16 +65,31 @@ def process_pipeline(
     
     # Initialize pipelines
     console.print("[bold blue]Initializing pipelines...[/bold blue]")
+
+    # Display model information
+    if model_name:
+        console.print(f"[cyan]Using embedding model: {model_name}[/cyan]")
+        # Try to get model metadata
+        try:
+            from ..embeddings.model_registry import get_model_registry
+            registry = get_model_registry()
+            metadata = registry.get_model_metadata(model_name)
+            if metadata:
+                console.print(f"[cyan]Model info: {metadata.embedding_dimension}D, adapter: {metadata.adapter_class.__name__}[/cyan]")
+        except Exception as e:
+            logger.debug(f"Could not retrieve model metadata: {e}")
+
     preprocessing_pipeline = PreprocessingPipeline()
     embedding_pipeline = EmbeddingPipeline(
         batch_size=batch_size,
-        enable_optimizations=True  # Enable hardware-aware optimizations (Task 4.5)
+        enable_optimizations=True,  # Enable hardware-aware optimizations (Task 4.5)
+        model_name=model_name  # Pass model name to embedding pipeline
     )
-    vector_store_pipeline = VectorStorePipeline()
+    vector_store_pipeline = VectorStorePipeline(model_name=model_name)
     
     # Find SRT files
     console.print(f"[bold blue]Scanning for SRT files in {input_dir}...[/bold blue]")
-    srt_files = find_srt_files(input_dir)
+    srt_files = find_srt_files(input_dir, max_files)
     
     if not srt_files:
         console.print("[bold red]No SRT files found![/bold red]")
@@ -205,13 +227,15 @@ def process_pipeline(
         )
         
         embeddings_list = []
+        actual_model_names = []
         for processed_video in processed_videos:
             try:
-                embeddings, metadata = embedding_pipeline.generate_embeddings_with_checkpointing(
+                embeddings, metadata, actual_model_name = embedding_pipeline.generate_embeddings_with_checkpointing(
                     processed_video,
                     show_progress=False  # We have our own progress bar
                 )
                 embeddings_list.append(embeddings)
+                actual_model_names.append(actual_model_name)
                 progress.update(task_embeddings, advance=1)
             except Exception as e:
                 logger.error(
@@ -238,13 +262,14 @@ def process_pipeline(
         )
         
         indexed_counts = {}
-        for processed_video, embeddings in zip(processed_videos, embeddings_list):
+        for processed_video, embeddings, actual_model_name in zip(processed_videos, embeddings_list, actual_model_names):
             try:
                 indexed_count = vector_store_pipeline.index_processed_video(
                     processed_video,
                     embeddings,
                     skip_duplicates=True,
-                    show_progress=False
+                    show_progress=False,
+                    model_name=actual_model_name
                 )
                 indexed_counts[processed_video.metadata.video_id] = indexed_count
                 stats["total_indexed"] += indexed_count
@@ -320,11 +345,24 @@ def main():
         help="Batch size for embedding generation"
     )
     parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Embedding model to use (default: from config or BAAI/bge-large-en-v1.5). "
+             "Examples: 'BAAI/bge-large-en-v1.5', 'google/embeddinggemma-300m'"
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Suppress progress bars"
     )
-    
+    parser.add_argument(
+        "--max-files",
+        type=int,
+        default=None,
+        help="Maximum number of SRT files to process (useful for testing)"
+    )
+
     args = parser.parse_args()
     
     if not args.input_dir.exists():
@@ -332,6 +370,19 @@ def main():
         sys.exit(1)
     
     console = Console()
+    
+    # Clear checkpoint files before processing
+    checkpoint_dir = Path(__file__).parent.parent / "data" / "checkpoints"
+    if checkpoint_dir.exists():
+        checkpoint_files = glob.glob(str(checkpoint_dir / "*.pkl"))
+        if checkpoint_files:
+            console.print(f"[yellow]Removing {len(checkpoint_files)} checkpoint file(s)...[/yellow]")
+            for checkpoint_file in checkpoint_files:
+                try:
+                    Path(checkpoint_file).unlink()
+                except Exception as e:
+                    console.print(f"[red]Warning: Could not remove {checkpoint_file}: {e}[/red]")
+            console.print("[green]✓ Checkpoints cleared[/green]")
     
     console.print(Panel.fit(
         "[bold blue]Subtitle Embedding & Retrieval System[/bold blue]\n"
@@ -346,14 +397,16 @@ def main():
             parallel_preprocessing=not args.no_parallel,
             max_workers=args.max_workers,
             batch_size=args.batch_size,
-            show_progress=not args.quiet
+            show_progress=not args.quiet,
+            model_name=args.model,
+            max_files=args.max_files
         )
         
         print_summary(stats, console)
         
         # Get final index statistics
         try:
-            vector_store_pipeline = VectorStorePipeline()
+            vector_store_pipeline = VectorStorePipeline(model_name=args.model)
             index_stats = vector_store_pipeline.get_index_statistics()
             console.print("\n[bold blue]Vector Store Statistics:[/bold blue]")
             console.print(f"  Total documents: {index_stats.get('total_documents', 'N/A')}")
