@@ -57,3 +57,7 @@ htmlcov/
 
 data/*
 *.srt
+
+subtitles/
+subtitles_test/
+subtitles/*

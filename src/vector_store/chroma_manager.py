@@ -9,11 +9,12 @@ from typing import Optional, List, Dict
 import warnings
 
 # Suppress ChromaDB warnings about Python 3.14 compatibility
-warnings.filterwarnings('ignore', category=UserWarning, module='chromadb')
+warnings.filterwarnings("ignore", category=UserWarning, module="chromadb")
 
 try:
     import chromadb
     from chromadb.config import Settings
+
     CHROMADB_AVAILABLE = True
 except ImportError:
     CHROMADB_AVAILABLE = False
@@ -27,15 +28,13 @@ from ..embeddings.model_registry import get_model_registry
 
 class ChromaDBManager:
     """Manages ChromaDB database and collections."""
-    
+
     def __init__(
-        self,
-        db_path: Optional[str] = None,
-        collection_name: Optional[str] = None
+        self, db_path: Optional[str] = None, collection_name: Optional[str] = None
     ):
         """
         Initialize ChromaDB manager.
-        
+
         Args:
             db_path: Path to ChromaDB database (default from config)
             collection_name: Name of collection (default from config)
@@ -44,22 +43,20 @@ class ChromaDBManager:
             raise ImportError(
                 "ChromaDB is not available. Please install it or check compatibility."
             )
-        
+
         self.config = get_config()
         self.db_path = Path(db_path or self.config.VECTOR_DB_PATH)
         self.collection_name = collection_name or self.config.COLLECTION_NAME
         self.logger = get_default_logger()
-        
+
         self.client: Optional[chromadb.Client] = None
         self.collection: Optional[chromadb.Collection] = None
-        
+
         # Create database directory
         self.db_path.mkdir(parents=True, exist_ok=True)
 
     def _generate_collection_name(
-        self,
-        model_name: Optional[str] = None,
-        base_name: Optional[str] = None
+        self, model_name: Optional[str] = None, base_name: Optional[str] = None
     ) -> str:
         """
         Generate a model-specific collection name.
@@ -69,7 +66,7 @@ class ChromaDBManager:
             base_name: Base collection name (uses config default if None)
 
         Returns:
-            Model-specific collection name like "subtitle_embeddings_bge_large"
+            Model-specific collection name like "document_embeddings_bge_large"
         """
         # Get model name from config if not provided
         if model_name is None:
@@ -117,11 +114,13 @@ class ChromaDBManager:
             model_part = model_name
 
         # Remove version numbers and common suffixes
-        model_part = re.sub(r'[-_]v?\d+(\.\d+)*.*$', '', model_part)  # Remove version suffixes
-        model_part = re.sub(r'[-_]en.*$', '', model_part)  # Remove language suffixes
+        model_part = re.sub(
+            r"[-_]v?\d+(\.\d+)*.*$", "", model_part
+        )  # Remove version suffixes
+        model_part = re.sub(r"[-_]en.*$", "", model_part)  # Remove language suffixes
 
         # Extract key components (take first 2-3 meaningful words)
-        words = re.findall(r'[a-zA-Z]+', model_part)
+        words = re.findall(r"[a-zA-Z]+", model_part)
         if len(words) >= 2:
             # Take first 2 words, or first word + important keywords
             if "bge" in words[0].lower():
@@ -151,65 +150,62 @@ class ChromaDBManager:
 
         # Replace invalid characters with underscores
         # Allow: alphanumeric, underscore, dash
-        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '_', name)
+        sanitized = re.sub(r"[^a-zA-Z0-9_-]", "_", name)
 
         # Remove multiple consecutive underscores
-        sanitized = re.sub(r'_+', '_', sanitized)
+        sanitized = re.sub(r"_+", "_", sanitized)
 
         # Remove leading/trailing underscores
-        sanitized = sanitized.strip('_')
+        sanitized = sanitized.strip("_")
 
         # Ensure not empty
         if not sanitized:
             sanitized = "default_collection"
 
         return sanitized
-    
+
     def initialize(self) -> chromadb.Client:
         """
         Initialize ChromaDB client.
-        
+
         Returns:
             ChromaDB client instance
         """
         if self.client is not None:
             return self.client
-        
+
         try:
             self.logger.info(f"Initializing ChromaDB at {self.db_path}")
-            
+
             # Create persistent client
             self.client = chromadb.PersistentClient(
                 path=str(self.db_path),
-                settings=Settings(
-                    anonymized_telemetry=False,
-                    allow_reset=True
-                )
+                settings=Settings(anonymized_telemetry=False, allow_reset=True),
             )
-            
+
             self.logger.info("ChromaDB client initialized successfully")
             return self.client
-        
+
         except Exception as e:
             self.logger.error(f"Failed to initialize ChromaDB: {e}", exc_info=True)
             raise
-    
+
     def get_client(self) -> chromadb.Client:
         """
         Get ChromaDB client (initializes if needed).
-        
+
         Returns:
             ChromaDB client instance
         """
         if self.client is None:
             return self.initialize()
         return self.client
-    
+
     def get_or_create_collection(
         self,
         name: Optional[str] = None,
         embedding_dimension: Optional[int] = None,
-        model_name: Optional[str] = None
+        model_name: Optional[str] = None,
     ) -> chromadb.Collection:
         """
         Get or create a collection.
@@ -228,7 +224,7 @@ class ChromaDBManager:
             collection_name = self._generate_collection_name(model_name)
         else:
             collection_name = name or self.collection_name
-            
+
         # Determine embedding dimension
         if embedding_dimension is None:
             if model_name is not None:
@@ -243,19 +239,21 @@ class ChromaDBManager:
                         config = get_config()
                         embedding_dimension = config.get_embedding_dimension()
                 except Exception as e:
-                    self.logger.warning(f"Could not get embedding dimension from model metadata: {e}")
+                    self.logger.warning(
+                        f"Could not get embedding dimension from model metadata: {e}"
+                    )
                     config = get_config()
                     embedding_dimension = config.get_embedding_dimension()
             else:
                 # Use config default
                 config = get_config()
                 embedding_dimension = config.get_embedding_dimension()
-        
+
         if self.collection is not None and self.collection.name == collection_name:
             return self.collection
-        
+
         client = self.get_client()
-        
+
         try:
             # Try to get existing collection
             self.collection = client.get_collection(name=collection_name)
@@ -265,14 +263,14 @@ class ChromaDBManager:
             self._validate_collection_metadata(
                 collection=self.collection,
                 expected_dimension=embedding_dimension,
-                expected_model=model_name
+                expected_model=model_name,
             )
 
         except Exception:
             # Collection doesn't exist, create it
             try:
                 self.logger.info(f"Creating new collection: {collection_name}")
-                
+
                 # Create collection with model metadata
                 metadata = {
                     "embedding_dimension": embedding_dimension,
@@ -286,70 +284,75 @@ class ChromaDBManager:
                         registry = get_model_registry()
                         model_metadata = registry.get_model_metadata(model_name)
                         if model_metadata:
-                            metadata["model_adapter"] = model_metadata.adapter_class.__name__
-                            metadata["max_sequence_length"] = model_metadata.max_sequence_length
-                            metadata["precision_requirements"] = str(model_metadata.precision_requirements)
+                            metadata["model_adapter"] = (
+                                model_metadata.adapter_class.__name__
+                            )
+                            metadata["max_sequence_length"] = (
+                                model_metadata.max_sequence_length
+                            )
+                            metadata["precision_requirements"] = str(
+                                model_metadata.precision_requirements
+                            )
                     except Exception as e:
                         self.logger.debug(f"Could not add model metadata: {e}")
 
                 self.collection = client.create_collection(
-                    name=collection_name,
-                    metadata=metadata
+                    name=collection_name, metadata=metadata
                 )
-                
+
                 self.logger.info(f"Collection created: {collection_name}")
-            
+
             except Exception as e:
                 self.logger.error(f"Failed to create collection: {e}", exc_info=True)
                 raise
-        
+
         return self.collection
-    
+
     def delete_collection(self, name: Optional[str] = None) -> None:
         """
         Delete a collection.
-        
+
         Args:
             name: Collection name (uses default if None)
         """
         collection_name = name or self.collection_name
         client = self.get_client()
-        
+
         try:
             client.delete_collection(name=collection_name)
             self.logger.info(f"Deleted collection: {collection_name}")
-            
+
             # Reset collection reference if it was the current one
             if self.collection and self.collection.name == collection_name:
                 self.collection = None
-        
+
         except Exception as e:
             self.logger.warning(f"Failed to delete collection: {e}")
-    
+
     def list_collections(self) -> List[str]:
         """
         List all collections.
-        
+
         Returns:
             List of collection names
         """
         client = self.get_client()
         collections = client.list_collections()
         return [col.name for col in collections]
-    
+
     def get_collection_stats(self, name: Optional[str] = None) -> Dict:
         """
         Get statistics for a collection.
-        
+
         Args:
             name: Collection name (uses default if None)
-        
+
         Returns:
             Dictionary with collection statistics
         """
         collection_name = name or self.collection_name
         collection = self.get_or_create_collection(name=collection_name)
-        
+
         try:
             count = collection.count()
             return {
@@ -364,34 +367,36 @@ class ChromaDBManager:
                 "count": 0,
                 "error": str(e),
             }
-    
+
     def reset_database(self) -> None:
         """Reset the entire database (delete all collections)."""
         client = self.get_client()
-        
+
         try:
             collections = client.list_collections()
             for col in collections:
                 client.delete_collection(name=col.name)
-            
+
             self.collection = None
             self.logger.info("Database reset successfully")
-        
+
         except Exception as e:
             self.logger.error(f"Failed to reset database: {e}", exc_info=True)
             raise
-    
+
     def health_check(self) -> bool:
         """
         Perform health check on ChromaDB.
-        
+
         Returns:
             True if healthy, False otherwise
         """
         try:
             client = self.get_client()
             collections = client.list_collections()
-            self.logger.debug(f"ChromaDB health check passed: {len(collections)} collections")
+            self.logger.debug(
+                f"ChromaDB health check passed: {len(collections)} collections"
+            )
             return True
         except Exception as e:
             self.logger.error(f"ChromaDB health check failed: {e}")
@@ -400,6 +405,7 @@ class ChromaDBManager:
     def _get_current_timestamp(self) -> str:
         """Get current timestamp as ISO string."""
         from datetime import datetime
+
         return datetime.utcnow().isoformat() + "Z"
 
     def list_collections_by_model(self) -> Dict[str, str]:
@@ -423,7 +429,9 @@ class ChromaDBManager:
                 model_collections[model_name] = collection_name
 
             except Exception as e:
-                self.logger.debug(f"Could not get metadata for collection {collection_name}: {e}")
+                self.logger.debug(
+                    f"Could not get metadata for collection {collection_name}: {e}"
+                )
                 model_collections.setdefault("unknown", []).append(collection_name)
 
         return model_collections
@@ -439,12 +447,12 @@ class ChromaDBManager:
             ChromaDB collection for the specified model
         """
         collection_name = self._generate_collection_name(model_name)
-        return self.get_or_create_collection(name=collection_name, model_name=model_name)
+        return self.get_or_create_collection(
+            name=collection_name, model_name=model_name
+        )
 
     def validate_collection_model(
-        self,
-        collection_name: str,
-        expected_model_name: str
+        self, collection_name: str, expected_model_name: str
     ) -> Dict[str, any]:
         """
         Validate that a collection matches the expected model.
@@ -470,7 +478,9 @@ class ChromaDBManager:
             try:
                 registry = get_model_registry()
                 expected_metadata = registry.get_model_metadata(expected_model_name)
-                expected_dimension = expected_metadata.embedding_dimension if expected_metadata else None
+                expected_dimension = (
+                    expected_metadata.embedding_dimension if expected_metadata else None
+                )
                 dimension_valid = stored_dimension == expected_dimension
             except Exception:
                 dimension_valid = True  # Skip dimension check if registry unavailable
@@ -489,9 +499,13 @@ class ChromaDBManager:
             if not is_valid:
                 errors = []
                 if not model_valid:
-                    errors.append(f"Model mismatch: expected '{expected_model_name}', found '{stored_model}'")
+                    errors.append(
+                        f"Model mismatch: expected '{expected_model_name}', found '{stored_model}'"
+                    )
                 if not dimension_valid:
-                    errors.append(f"Dimension mismatch: expected {expected_dimension}, found {stored_dimension}")
+                    errors.append(
+                        f"Dimension mismatch: expected {expected_dimension}, found {stored_dimension}"
+                    )
                 result["errors"] = errors
 
             return result
@@ -501,14 +515,11 @@ class ChromaDBManager:
                 "valid": False,
                 "collection_name": collection_name,
                 "expected_model": expected_model_name,
-                "error": str(e)
+                "error": str(e),
             }
 
     def migrate_collection(
-        self,
-        old_model_name: str,
-        new_model_name: str,
-        delete_old: bool = False
+        self, old_model_name: str, new_model_name: str, delete_old: bool = False
     ) -> Dict[str, any]:
         """
         Migrate data from one model collection to another.
@@ -537,14 +548,14 @@ class ChromaDBManager:
             "old_model": old_model_name,
             "new_model": new_model_name,
             "reason": "Re-embedding required - not implemented in this phase",
-            "delete_old": delete_old
+            "delete_old": delete_old,
         }
 
     def _validate_collection_metadata(
         self,
         collection: chromadb.Collection,
         expected_dimension: int,
-        expected_model: Optional[str] = None
+        expected_model: Optional[str] = None,
     ) -> None:
         """
         Validate collection metadata against expected parameters.
@@ -600,7 +611,9 @@ class ChromaDBManager:
             except Exception as e:
                 self.logger.debug(f"Could not check model compatibility: {e}")
 
-    def validate_collection_model(self, collection_name: str, expected_model_name: str) -> Dict[str, any]:
+    def validate_collection_model(
+        self, collection_name: str, expected_model_name: str
+    ) -> Dict[str, any]:
         """
         Validate that a collection matches an expected model.
 
@@ -630,7 +643,7 @@ class ChromaDBManager:
                 "collection_dimension": collection_dimension,
                 "valid": True,
                 "warnings": [],
-                "errors": []
+                "errors": [],
             }
 
             if collection_model and collection_model != expected_model_name:
@@ -658,5 +671,5 @@ class ChromaDBManager:
                 "expected_model": expected_model_name,
                 "valid": False,
                 "errors": [f"Collection access failed: {str(e)}"],
-                "warnings": []
+                "warnings": [],
             }

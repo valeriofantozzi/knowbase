@@ -45,6 +45,16 @@ except Exception as e:  # pragma: no cover
     print("Errore: yt-dlp non è installato. Installa con: pip install yt-dlp", file=sys.stderr)
     raise
 
+try:
+    from tqdm import tqdm
+    from tqdm.contrib.concurrent import process_map
+    TQDM_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    print("Avviso: tqdm non disponibile. Le progress bar saranno disabilitate.", file=sys.stderr)
+    tqdm = None
+    process_map = None
+    TQDM_AVAILABLE = False
+
 
 # ------------------------------
 # Logging setup
@@ -67,6 +77,16 @@ class YTDLPLogger:
         self._log.info(msg)
 
     def warning(self, msg: str) -> None:
+        # Filtra warning non utili per l'utente finale
+        if any(skip_pattern in msg for skip_pattern in [
+            "Some web client https formats have been skipped",
+            "Some web_safari client https formats have been skipped",
+            "YouTube is forcing SABR streaming",
+            "No supported JavaScript runtime could be found"
+        ]):
+            # Logga come debug invece di warning per non disturbare l'utente
+            self._log.debug(f"yt-dlp filtered warning: {msg}")
+            return
         self._log.warning(msg)
 
     def error(self, msg: str) -> None:
@@ -155,6 +175,10 @@ def extract_video_list(
         "quiet": True,
         # Limita numero di item della playlist (se fornito)
         "playlistend": limit,
+        # Riduci warning yt-dlp usando un client specifico
+        "extractor_args": {
+            "youtube": ["player_client=web", "skip=hls,dash"]
+        },
     }
 
     logger.info("Estrazione lista video da: %s", url)
@@ -163,8 +187,14 @@ def extract_video_list(
 
     logger.debug("Tipo radice estratta: %s | Keys: %s", type(info).__name__, list(info.keys())[:10])
 
+    # Converti entries in lista per poter iterare con tqdm
+    all_entries = list(_flatten_entries(info))
     videos: List[Dict] = []
-    for idx, e in enumerate(_flatten_entries(info)):
+
+    # Usa progress bar se tqdm è disponibile
+    iterator = tqdm(all_entries, desc="Estrazione video", unit="video") if TQDM_AVAILABLE else all_entries
+
+    for e in iterator:
         vid_url = e.get("url") or e.get("webpage_url")
         vid_id = e.get("id")
         title = e.get("title")
@@ -186,11 +216,13 @@ def extract_video_list(
             continue
 
         videos.append({"id": vid_id, "title": title, "url": vid_url})
-        if (idx + 1) % 50 == 0:
-            logger.info("Raccolti %d video finora...", idx + 1)
 
         if limit is not None and len(videos) >= limit:
             break
+
+    # Chiudi la progress bar se aperta
+    if TQDM_AVAILABLE and hasattr(iterator, 'close'):
+        iterator.close()
 
     logger.info("Totale video estratti: %d", len(videos))
     return videos
@@ -269,19 +301,19 @@ def _progress_hook(d: Dict) -> None:
 
 
 def _download_single_video(
-    video_data: Tuple[Dict, str, str, bool, Optional[List[str]]]
+    video_data: Tuple[Dict, str, str, bool, Optional[List[str]], bool]
 ) -> Tuple[bool, str, bool]:
     """Scarica i sottotitoli per un singolo video.
-    
+
     Args:
-        video_data: Tupla contenente (video_dict, output_dir, sub_format, all_langs, langs)
-    
+        video_data: Tupla contenente (video_dict, output_dir, sub_format, all_langs, langs, force)
+
     Returns:
         Tupla (success, video_url, skipped) dove:
         - success è True se il download è riuscito o è stato saltato
         - skipped è True se il file esisteva già
     """
-    video, output_dir, sub_format, all_langs, langs = video_data
+    video, output_dir, sub_format, all_langs, langs, force = video_data
     
     vid_url = video["url"]
     vid_id = video.get("id")
@@ -290,9 +322,9 @@ def _download_single_video(
     # Configura logger locale per questo processo
     # Il logger eredita la configurazione dal processo principale
     process_logger = logging.getLogger(LOGGER_NAME)
-    
-    # Controlla se il sottotitolo esiste già
-    if _check_subtitle_exists(vid_id, output_dir, sub_format, langs):
+
+    # Controlla se il sottotitolo esiste già (solo se non è forzato)
+    if not force and _check_subtitle_exists(vid_id, output_dir, sub_format, langs):
         process_logger.info("⊘ [%s] %s - Già scaricato, skip", vid_id, title)
         return (True, vid_url, True)
     
@@ -315,10 +347,10 @@ def _download_single_video(
         "allsubtitles": bool(all_langs),
         # Se vuoi limitare lingue specifiche, es. ["it", "en"]
         "subtitleslangs": langs or [],
-        
+
         # Non scaricare il video, solo i sottotitoli
         "skip_download": True,
-        
+
         # Naming file output
         "outtmpl": os.path.join(
             output_dir,
@@ -326,15 +358,20 @@ def _download_single_video(
             "%(upload_date)s_%(id)s_%(title)s.%(ext)s",
         ),
         "restrictfilenames": True,
-        
+
         # Robustezza
         "ignoreerrors": True,
-        
+
         # Logging
         "logger": YTDLPLogger(process_logger),
         "progress_hooks": [_progress_hook],
         "quiet": True,
         "no_warnings": False,
+
+        # Riduci warning yt-dlp
+        "extractor_args": {
+            "youtube": ["player_client=web", "skip=hls,dash"]
+        },
     }
     
     try:
@@ -360,11 +397,12 @@ def download_subtitles(
     all_langs: bool = False,
     langs: Optional[List[str]] = None,
     num_workers: Optional[int] = None,
+    force: bool = False,
 ) -> Dict[str, int]:
     """Scarica sottotitoli per ogni video usando multiprocessing.
 
     Ritorna un dizionario con conteggi di successi/errori/saltati.
-    
+
     Args:
         videos: Lista di dizionari con info video
         output_dir: Directory di output
@@ -372,36 +410,80 @@ def download_subtitles(
         all_langs: Scarica tutte le lingue disponibili
         langs: Lista codici lingua specifici
         num_workers: Numero di processi worker (None = auto-calcolato)
+        force: Forza il riscaricamento anche se i file esistono già
     """
     os.makedirs(output_dir, exist_ok=True)
 
     # Calcola numero ottimale di worker se non specificato
     if num_workers is None:
         num_workers = _calculate_optimal_workers()
-    
+
     # Limita il numero di worker al numero di video disponibili
     num_workers = min(num_workers, len(videos))
-    
+
     logger.info("Inizio download sottotitoli per %d video usando %d processi", len(videos), num_workers)
     logger.debug("Core disponibili: %d", os.cpu_count() or 1)
 
     # Prepara i dati per ogni video (tupla per passare a _download_single_video)
     video_tasks = [
-        (video, output_dir, sub_format, all_langs, langs)
+        (video, output_dir, sub_format, all_langs, langs, force)
         for video in videos
     ]
+
+    # Se non è forzato il download, filtra i video già scaricati
+    if not force:
+        logger.info("Controllo file esistenti...")
+        filtered_tasks = []
+        pre_skipped = 0
+
+        for video_task in tqdm(video_tasks, desc="Controllo esistenti", unit="video", disable=not TQDM_AVAILABLE):
+            video, output_dir_task, sub_format_task, all_langs_task, langs_task, force_task = video_task
+            vid_id = video.get("id")
+
+            if _check_subtitle_exists(vid_id, output_dir_task, sub_format_task, langs_task):
+                logger.debug("⊘ [%s] %s - Già scaricato, skip", vid_id, video.get("title"))
+                pre_skipped += 1
+            else:
+                filtered_tasks.append(video_task)
+
+        video_tasks = filtered_tasks
+        logger.info("Video da scaricare: %d | Già scaricati: %d", len(video_tasks), pre_skipped)
+    else:
+        logger.info("Modalità force abilitata - riscarico tutti i video")
 
     success = 0
     failures = 0
     skipped = 0
 
-    # Usa multiprocessing solo se ci sono più video di quanti worker
-    # Altrimenti usa un singolo processo per evitare overhead
-    if num_workers > 1 and len(videos) > 1:
+    # Usa multiprocessing con progress bar se tqdm è disponibile
+    if TQDM_AVAILABLE and num_workers > 1 and len(videos) > 1:
+        # Usa process_map di tqdm per multiprocessing con progress bar
+        logger.debug("Uso multiprocessing con progress bar")
+        results = process_map(
+            _download_single_video,
+            video_tasks,
+            max_workers=num_workers,
+            desc="Download sottotitoli",
+            unit="video",
+            chunksize=1
+        )
+
+        # Conta successi, fallimenti e saltati
+        for success_flag, vid_url, was_skipped in results:
+            if was_skipped:
+                skipped += 1
+            elif success_flag:
+                success += 1
+            else:
+                failures += 1
+
+    # Usa multiprocessing senza progress bar o fallback sequenziale
+    elif num_workers > 1 and len(videos) > 1:
         # Usa multiprocessing.Pool per parallelizzare i download
+        logger.debug("Uso multiprocessing senza progress bar")
         with multiprocessing.Pool(processes=num_workers) as pool:
             results = pool.map(_download_single_video, video_tasks)
-        
+
         # Conta successi, fallimenti e saltati
         for success_flag, vid_url, was_skipped in results:
             if was_skipped:
@@ -413,7 +495,11 @@ def download_subtitles(
     else:
         # Fallback sequenziale per piccoli batch o singolo worker
         logger.debug("Uso modalità sequenziale (worker=%d, video=%d)", num_workers, len(videos))
-        for video_task in video_tasks:
+
+        # Usa progress bar anche in modalità sequenziale se tqdm disponibile
+        iterator = tqdm(video_tasks, desc="Download sottotitoli", unit="video") if TQDM_AVAILABLE else video_tasks
+
+        for video_task in iterator:
             success_flag, vid_url, was_skipped = _download_single_video(video_task)
             if was_skipped:
                 skipped += 1
@@ -421,6 +507,10 @@ def download_subtitles(
                 success += 1
             else:
                 failures += 1
+
+        # Chiudi la progress bar se aperta
+        if TQDM_AVAILABLE and hasattr(iterator, 'close'):
+            iterator.close()
 
     logger.info("Download completato. Successi: %d | Saltati: %d | Errori: %d", success, skipped, failures)
     return {"success": success, "failures": failures, "skipped": skipped}
@@ -481,6 +571,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=None,
         help="Numero di processi worker per il download parallelo (default: auto-calcolato basato sui core CPU)",
     )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="Forza il riscaricamento anche se i sottotitoli esistono già",
+    )
     return p.parse_args(argv)
 
 
@@ -520,6 +615,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         all_langs=all_langs,
         langs=langs,
         num_workers=args.workers,
+        force=args.force,
     )
 
     # Exit code basato su presenza errori

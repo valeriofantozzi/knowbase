@@ -1,20 +1,20 @@
-# Subtitle Embedding & Retrieval System
+# KnowBase - Document Embedding & Retrieval System
 
-A semantic search system for YouTube subtitle files that enables natural language queries over video content using multiple state-of-the-art embedding models.
+A semantic search system for document knowledge bases that enables natural language queries over various document types using multiple state-of-the-art embedding models.
 
 ## Overview
 
-This system processes YouTube subtitle files (SRT format), generates high-quality embeddings using configurable embedding models, and stores them in a local ChromaDB vector database for fast semantic search. Supports multiple embedding models including BGE-large-en-v1.5 and EmbeddingGemma-300m.
+KnowBase processes documents (including SRT subtitles, PDFs, text files, and more), generates high-quality embeddings using configurable embedding models, and stores them in a local ChromaDB vector database for fast semantic search. Supports multiple embedding models including BGE-large-en-v1.5 and EmbeddingGemma-300m.
 
 ## Features
 
-- **Preprocessing Pipeline**: Parse SRT files, clean text, and create semantic chunks
+- **Preprocessing Pipeline**: Parse documents (SRT, PDF, text, markdown), clean text, and create semantic chunks
 - **Multi-Model Embedding**: Choose from multiple state-of-the-art embedding models (BGE, EmbeddingGemma, and extensible to others)
 - **Dynamic Model Switching**: Switch between models at runtime with intelligent caching
 - **Model-Specific Collections**: Automatic isolation of embeddings by model to prevent conflicts
 - **Adaptive Dimensions**: Support for different embedding dimensions (1024 for BGE, 768 for EmbeddingGemma with MRL support)
 - **Vector Storage**: Store embeddings with rich metadata in ChromaDB
-- **Semantic Search**: Query video content using natural language
+- **Semantic Search**: Query document content using natural language
 - **CLI Interface**: Command-line tools for processing and querying with model selection
 - **Web Interface**: Streamlit app for interactive search with model selection
 
@@ -46,18 +46,18 @@ This system processes YouTube subtitle files (SRT format), generates high-qualit
 
 ### Usage
 
-1. Process subtitle files (default BGE model):
+1. Process document files (default BGE model):
    ```bash
-   python scripts/process_subtitles.py --input subtitles/
+   python scripts/process_subtitles.py --input documents/
    ```
 
 2. Process with specific model:
    ```bash
    # Use EmbeddingGemma model
-   python scripts/process_subtitles.py --input subtitles/ --model "google/embeddinggemma-300m"
+   python scripts/process_subtitles.py --input documents/ --model "google/embeddinggemma-300m"
 
    # Use BGE model explicitly
-   python scripts/process_subtitles.py --input subtitles/ --model "BAAI/bge-large-en-v1.5"
+   python scripts/process_subtitles.py --input documents/ --model "BAAI/bge-large-en-v1.5"
    ```
 
 3. Query the indexed content:
@@ -75,7 +75,7 @@ This system processes YouTube subtitle files (SRT format), generates high-qualit
 ```
 project_root/
 ├── src/                    # Source code
-│   ├── preprocessing/      # SRT parsing, text cleaning, chunking
+│   ├── preprocessing/      # Document parsing, text cleaning, chunking
 │   ├── embeddings/         # Multi-model embedding system
 │   │   ├── adapters/       # Model-specific adapters (BGE, EmbeddingGemma)
 │   │   ├── model_loader.py # Model loading with adapter pattern
@@ -87,7 +87,7 @@ project_root/
 │   └── utils/              # Configuration, logging, utilities
 ├── scripts/                # CLI scripts (with --model support)
 ├── data/                   # Data directories
-│   ├── raw/               # Original subtitle files
+│   ├── raw/               # Original document files
 │   ├── processed/         # Processed chunks
 │   └── vector_db/        # ChromaDB storage (model-specific collections)
 ├── docs/                   # Documentation
@@ -121,10 +121,10 @@ MODEL_NAME=google/embeddinggemma-300m
 Override the default model for specific operations:
 ```bash
 # Processing with BGE
-python scripts/process_subtitles.py --input subtitles/ --model "BAAI/bge-large-en-v1.5"
+python scripts/process_subtitles.py --input documents/ --model "BAAI/bge-large-en-v1.5"
 
 # Processing with EmbeddingGemma
-python scripts/process_subtitles.py --input subtitles/ --model "google/embeddinggemma-300m"
+python scripts/process_subtitles.py --input documents/ --model "google/embeddinggemma-300m"
 ```
 
 #### Programmatic Usage
@@ -142,8 +142,8 @@ gemma_pipeline = EmbeddingPipeline(model_name="google/embeddinggemma-300m")
 
 Each model stores embeddings in separate ChromaDB collections to prevent conflicts:
 
-- **BGE collections**: `subtitle_embeddings_bge_large`
-- **EmbeddingGemma collections**: `subtitle_embeddings_gemma_300m`
+- **BGE collections**: `document_embeddings_bge_large`
+- **EmbeddingGemma collections**: `document_embeddings_gemma_300m`
 
 Collections are automatically created and managed based on the selected model.
 

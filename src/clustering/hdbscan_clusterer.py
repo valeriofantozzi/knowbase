@@ -102,12 +102,16 @@ class HDBSCANClusterer(Clusterer):
             embeddings_normalized = embeddings
         
         # Create HDBSCAN clusterer
+        # For cosine distance, use euclidean on normalized vectors (equivalent)
+        hdbscan_metric = "euclidean" if self.metric == "cosine" else self.metric
+
         self.clusterer = hdbscan.HDBSCAN(
             min_cluster_size=self.min_cluster_size,
             min_samples=self.min_samples,
-            metric=self.metric,
+            metric=hdbscan_metric,
             cluster_selection_method=self.cluster_selection_method,
             cluster_selection_epsilon=self.cluster_selection_epsilon,
+            prediction_data=True,  # Enable prediction capabilities
             **self.parameters
         )
         
@@ -159,6 +163,7 @@ class HDBSCANClusterer(Clusterer):
             embeddings_normalized = embeddings
         
         # Use approximate_predict for new points
+        # Note: approximate_predict uses the same metric as the fitted model
         labels, probabilities = hdbscan.approximate_predict(
             self.clusterer,
             embeddings_normalized
