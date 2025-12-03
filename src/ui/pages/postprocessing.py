@@ -120,8 +120,9 @@ def render_overview_tab() -> None:
         avg_chunks = total_docs / analysis["unique_sources"] if analysis["unique_sources"] > 0 else 0
         metric_card("Avg Chunks/Source", f"{avg_chunks:.1f}", icon="📏")
     with col4:
-        if sample.get("embeddings") and len(sample["embeddings"]) > 0:
-            emb_dim = len(sample["embeddings"][0])
+        embeddings = sample.get("embeddings")
+        if embeddings is not None and len(embeddings) > 0:
+            emb_dim = len(embeddings[0])
             metric_card("Embedding Dim", emb_dim, icon="🔢")
     
     st.markdown("---")
@@ -250,7 +251,7 @@ def generate_visualization(
             )
             
             embeddings = sample.get("embeddings")
-            if not embeddings or len(embeddings) == 0:
+            if embeddings is None or len(embeddings) == 0:
                 st.error("No embeddings found in database")
                 return
             
@@ -700,6 +701,14 @@ def render_postprocessing_page() -> None:
     
     This is the main entry point for the page module.
     """
+    # Initialize total_docs from collection if not set
+    if "total_docs" not in st.session_state or st.session_state.get("total_docs", 0) == 0:
+        if "collection" in st.session_state and st.session_state.collection is not None:
+            try:
+                st.session_state.total_docs = st.session_state.collection.count()
+            except Exception:
+                st.session_state.total_docs = 0
+    
     st.header(f"{ICONS['analysis']} PostProcessing")
     st.markdown("Analyze and visualize your embedding space.")
     

@@ -15,16 +15,7 @@ from .parser_base import (
 )
 
 # Format-specific parsers (auto-register on import)
-from .parsers import (
-    SRTDocumentParser,
-    SRTParser,  # Alias for SRTDocumentParser
-    SubtitleEntry,
-    TextDocumentParser,
-    MarkdownDocumentParser,
-)
-
-# Legacy SRT parser
-from .srt_parser import SRTParser as LegacySRTParser, SubtitleEntry as LegacySubtitleEntry
+from .parsers import DoclingParser
 
 # Other preprocessing components
 from .text_cleaner import TextCleaner
@@ -41,11 +32,7 @@ __all__ = [
     "find_document_files",
     
     # Parsers
-    "SRTDocumentParser",
-    "SRTParser",
-    "SubtitleEntry",
-    "TextDocumentParser",
-    "MarkdownDocumentParser",
+    "DoclingParser",
     
     # Processing components
     "TextCleaner",

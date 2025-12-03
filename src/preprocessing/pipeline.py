@@ -12,7 +12,7 @@ import json
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from functools import partial
 
-from .srt_parser import SRTParser, SubtitleEntry
+from .parsers.docling_parser import DoclingParser
 from .text_cleaner import TextCleaner
 from .chunker import SemanticChunker, Chunk
 from .metadata_extractor import MetadataExtractor
@@ -35,7 +35,7 @@ class ProcessedDocument:
     This is the generalized version that works with any document type.
     """
     metadata: SourceMetadata
-    entries: Union[List[TextEntry], List[SubtitleEntry]]
+    entries: List[TextEntry]
     chunks: List[Chunk]
     stats: Dict
     content_type: str = "unknown"  # File type: "srt", "txt", "md", etc.
@@ -77,7 +77,6 @@ class PreprocessingPipeline:
             chunk_overlap: Overlap size in tokens (default from config)
             min_chunk_size: Minimum chunk size in tokens (default from config)
         """
-        self.parser = SRTParser()  # Legacy parser for backward compatibility
         self.cleaner = TextCleaner()
         self.chunker = SemanticChunker(
             chunk_size=chunk_size,
@@ -158,7 +157,7 @@ class PreprocessingPipeline:
         all_text = ' '.join(texts)
         
         # Clean text
-        cleaned_text = self.cleaner.clean_text(all_text)
+        cleaned_text = self.cleaner.clean(all_text)
         
         # Create chunks with metadata
         chunk_metadata = {
@@ -188,71 +187,10 @@ class PreprocessingPipeline:
     
     def _process_srt_legacy(self, file_path: Path) -> Optional[ProcessedDocument]:
         """
-        Legacy SRT processing for backward compatibility.
-        
-        Args:
-            file_path: Path to SRT file
-            
-        Returns:
-            ProcessedDocument object or None
+        Legacy SRT processing. Deprecated.
         """
-        # Extract metadata using legacy extractor
-        self.logger.debug(f"Extracting metadata from {file_path.name}")
-        try:
-            metadata = self.metadata_extractor.extract_from_filename(file_path)
-        except ValueError as e:
-            self.logger.warning(
-                f"Could not extract metadata from {file_path.name}: {e}. "
-                "Using default metadata."
-            )
-            metadata = SourceMetadata(
-                source_id="unknown",
-                date="0000/00/00",
-                title=file_path.stem,
-                source_type="srt",
-                original_filename=file_path.name,
-                file_path=str(file_path.absolute())
-            )
-        
-        # Parse SRT file
-        self.logger.debug(f"Parsing SRT file: {file_path.name}")
-        entries = self.parser.parse_file(file_path)
-        
-        if not entries:
-            self.logger.warning(f"No subtitle entries found in {file_path.name}")
-            return None
-        
-        # Clean text from entries
-        self.logger.debug(f"Cleaning text from {len(entries)} entries")
-        cleaned_texts = self.cleaner.clean_subtitle_entries(entries)
-        all_cleaned_text = ' '.join(cleaned_texts)
-        
-        # Create chunks
-        self.logger.debug(f"Creating chunks from cleaned text")
-        chunk_metadata = {
-            "source_id": metadata.source_id,
-            "date": metadata.date,
-            "title": metadata.title,
-            "filename": metadata.original_filename,
-            "source_type": "srt",
-        }
-        chunks = self.chunker.chunk_text(all_cleaned_text, chunk_metadata)
-        
-        # Calculate statistics
-        stats = self._calculate_stats(entries, chunks, all_cleaned_text)
-        
-        self.logger.info(
-            f"Processed {file_path.name}: {len(entries)} entries, "
-            f"{len(chunks)} chunks, {stats['total_tokens']} tokens"
-        )
-        
-        return ProcessedDocument(
-            metadata=metadata,
-            entries=entries,
-            chunks=chunks,
-            stats=stats,
-            content_type="srt"
-        )
+        self.logger.warning("Legacy SRT processing is deprecated and SRTParser is removed.")
+        return None
     
     def process_multiple_files(
         self,
@@ -315,7 +253,7 @@ class PreprocessingPipeline:
     
     def _calculate_stats(
         self,
-        entries: Union[List[SubtitleEntry], List[TextEntry]],
+        entries: List[TextEntry],
         chunks: List[Chunk],
         text: str
     ) -> Dict:

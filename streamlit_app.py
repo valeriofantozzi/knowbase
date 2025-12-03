@@ -41,9 +41,17 @@ def initialize_collection() -> None:
     if not st.session_state.get("collection_initialized", False):
         with st.spinner("Loading vector database..."):
             try:
+                from src.utils.config import get_config
+                config = get_config()
+                model_name = config.MODEL_NAME
+                
                 manager = ChromaDBManager()
-                st.session_state.collection = manager.get_or_create_collection()
+                # Load model-specific collection (same as used during processing)
+                st.session_state.collection = manager.get_or_create_collection(
+                    model_name=model_name
+                )
                 st.session_state.total_docs = st.session_state.collection.count()
+                st.session_state.model_name = model_name
                 st.session_state.collection_initialized = True
             except Exception as e:
                 st.error(f"Failed to initialize database: {e}")
@@ -91,6 +99,13 @@ def render_sidebar() -> str:
     with st.sidebar.expander(f"{ICONS['settings']} Settings"):
         if st.button("🔄 Refresh Collection", use_container_width=True):
             st.session_state.collection_initialized = False
+            st.rerun()
+        
+        if st.button("⚙️ Reload Config (.env)", use_container_width=True):
+            from src.utils.config import reset_config
+            reset_config()
+            st.session_state.collection_initialized = False
+            st.success("Configuration reloaded from .env")
             st.rerun()
         
         st.caption("Version 2.0.0")

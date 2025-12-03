@@ -83,6 +83,11 @@ class SourceMetadata:
         """Alias for original_filename."""
         return self.original_filename
 
+    @property
+    def content_type(self) -> str:
+        """Alias for source_type."""
+        return self.source_type
+
 
 class DocumentParser(ABC):
     """

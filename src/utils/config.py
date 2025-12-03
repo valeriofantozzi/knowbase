@@ -34,7 +34,7 @@ class Config:
                 load_dotenv()  # Try default locations
         
         # Model Configuration
-        self.MODEL_NAME = os.getenv("MODEL_NAME", "BAAI/bge-large-en-v1.5")
+        self.MODEL_NAME = os.getenv("MODEL_NAME", "google/embeddinggemma-300m")
         self.MODEL_CACHE_DIR = os.path.expanduser(
             os.getenv("MODEL_CACHE_DIR", "~/.cache/huggingface")
         )
@@ -104,7 +104,14 @@ class Config:
         # Auto-optimize workers if not explicitly set
         workers_env = os.getenv("MAX_WORKERS")
         if workers_env:
-            self.MAX_WORKERS = self._get_int("MAX_WORKERS", os.cpu_count() or 1)
+            workers_value = self._get_int("MAX_WORKERS", -1)
+            if workers_value == -1:
+                # Auto-detect based on system resources with percentage limit
+                self.MAX_WORKERS = self._calculate_optimal_workers()
+            elif workers_value >= 0:
+                self.MAX_WORKERS = workers_value
+            else:
+                raise ValueError(f"MAX_WORKERS must be -1 or >= 0, got {workers_value}")
         else:
             # Auto-optimize based on hardware
             try:
@@ -145,6 +152,68 @@ class Config:
             return False
         else:
             raise ValueError(f"Invalid boolean value for {key}: {value}")
+    
+    def _get_float(self, key: str, default: float) -> float:
+        """Get float environment variable."""
+        value = os.getenv(key)
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            raise ValueError(f"Invalid float value for {key}: {value}")
+    
+    def _calculate_optimal_workers(self) -> int:
+        """
+        Calculate optimal number of workers based on system resources.
+        
+        Uses psutil to detect available CPU cores and applies the
+        MAX_WORKERS_PERCENTAGE to limit resource usage.
+        
+        Returns:
+            Optimal number of workers
+        """
+        try:
+            import psutil
+            
+            # Get percentage limit (default 0.75 = 75%)
+            percentage = self._get_float("MAX_WORKERS_PERCENTAGE", 0.75)
+            
+            # Validate percentage range
+            if not 0.0 < percentage <= 1.0:
+                raise ValueError(
+                    f"MAX_WORKERS_PERCENTAGE must be between 0.0 and 1.0, got {percentage}"
+                )
+            
+            # Get total CPU count (logical cores)
+            cpu_count = psutil.cpu_count(logical=True) or os.cpu_count() or 1
+            
+            # Calculate workers based on percentage
+            optimal_workers = max(1, int(cpu_count * percentage))
+            
+            # Log the calculation
+            from .logger import get_default_logger
+            logger = get_default_logger()
+            logger.info(
+                f"Auto-detected {optimal_workers} workers "
+                f"({percentage*100:.0f}% of {cpu_count} CPU cores)"
+            )
+            
+            return optimal_workers
+            
+        except ImportError:
+            # Fallback if psutil is not available
+            from .logger import get_default_logger
+            logger = get_default_logger()
+            logger.warning("psutil not available, using os.cpu_count() for worker calculation")
+            return os.cpu_count() or 1
+        except Exception as e:
+            # Fallback on any error
+            from .logger import get_default_logger
+            logger = get_default_logger()
+            logger.warning(f"Error calculating optimal workers: {e}. Using fallback.")
+            return os.cpu_count() or 1
+    
     
     def _validate(self) -> None:
         """Validate configuration values."""
