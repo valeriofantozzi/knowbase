@@ -1,70 +1,70 @@
-# 🧠 KnowBase — ricerca semantica immersiva per documenti
+# 🧠 KnowBase — Immersive Semantic Search for Documents
 
-Un toolkit pratico e immediato per trasformare raccolte di documenti (SRT, PDF, TXT, Markdown...) in una knowledge base ricercabile semanticamente. Usa modelli di embedding diversi, collezioni isolate per modello e una UI web integrata per esplorare i risultati.
+A practical and straightforward toolkit to transform document collections (SRT, PDF, TXT, Markdown...) into a semantically searchable knowledge base. Uses multiple embedding models, model-isolated collections, and an integrated web UI to explore results.
 
-Per sviluppatori e power users: semplice da estendere, pensato per testare modelli e pipeline diverse senza rompere gli indici esistenti.
+For developers and power users: easy to extend, designed for testing different models and pipelines without breaking existing indices.
 
 **✨ Highlights**
 
-- 🤖 **Multi-model**: supporto per `BAAI/bge-large-en-v1.5` e `google/embeddinggemma-300m` (e altri tramite adapter)
-- 🔐 **Collezioni isolate**: ogni modello scrive in collezioni separate in ChromaDB
-- 🔄 **Pipeline modulare**: parsing → chunking → embeddings → store → retrieval
-- 🎛️ **Interfacce**: script CLI per batch, API programmatica e interfaccia Streamlit per esplorazione
+- 🤖 **Multi-model**: support for `BAAI/bge-large-en-v1.5` and `google/embeddinggemma-300m` (and others via adapters)
+- 🔐 **Isolated collections**: each model writes to separate ChromaDB collections
+- 🔄 **Modular pipeline**: parsing → chunking → embeddings → store → retrieval
+- 🎛️ **Interfaces**: CLI scripts for batch, programmatic API, and Streamlit interface for exploration
 
-**⚡ Pronto per prototipi e sperimentazione**: caching dei modelli, selezione dinamica del device (CPU, CUDA, MPS), e helper per confronto di qualità tra modelli.
+**⚡ Ready for prototyping and experimentation**: model caching, dynamic device selection (CPU, CUDA, MPS), and helpers for quality comparison between models.
 
-**🚀 Quick TL;DR (esempio rapido)**
+**🚀 Quick TL;DR (quick example)**
 
-1. 📦 Crea e attiva un virtualenv:
+1. 📦 Create and activate a virtualenv:
 
 ```
 python -m venv .venv
 source .venv/bin/activate
 ```
 
-2. 📥 Installa dipendenze:
+2. 📥 Install dependencies:
 
 ```
 pip install -r requirements.txt
 ```
 
-3. ⚙️ Processa file (default model impostato in `.env`):
+3. ⚙️ Process files (default model set in `.env`):
 
 ```
 python scripts/process_subtitles.py --input subtitles/ --output data/processed
 ```
 
-4. 🔍 Cerca nei dati indicizzati:
+4. 🔍 Search in indexed data:
 
 ```
-python scripts/query_subtitles.py "come potrei rinvasare un'orchidea?"
+python scripts/query_subtitles.py "how to care for an orchid?"
 ```
 
-5. 🌐 Avvia la UI:
+5. 🌐 Start the web UI:
 
 ```
 ./start_viewer.sh
 ```
 
-**💡 Perché è figa?**
+**💡 Why it's awesome?**
 
-- ⚡ Cambio modello al volo: puoi confrontare embedding di modelli diversi senza mescolare i dati.
-- 🔌 Facilmente estendibile: il pattern a adapter rende l'aggiunta di un nuovo modello minimale.
-- ⏱️ Pensato per SRT e documenti con contesto temporale (subtitle-aware chunking).
+- ⚡ Swap models on the fly: compare embeddings from different models without mixing your data.
+- 🔌 Easily extensible: the adapter pattern makes adding a new model minimal.
+- ⏱️ Built for SRT and temporal documents (subtitle-aware chunking).
 
-**📁 Struttura chiave del repository**
+**📁 Key repository structure**
 
-- 🧠 `src/embeddings/` — adapter, loader e pipeline per generare embeddings.
-- 🔤 `src/preprocessing/` — parser per SRT, chunker, normalizzazione testo.
-- 🗄️ `src/vector_store/` — gestione ChromaDB, naming per collezioni model-specific.
-- 🛠️ `scripts/` — script CLI per processare, migrare e interrogare il DB.
-- 🎨 `streamlit_app.py` — interfaccia web per esplorare ricerche e cambiare modello.
+- 🧠 `src/embeddings/` — adapters, loaders, and pipelines to generate embeddings.
+- 🔤 `src/preprocessing/` — SRT parser, chunker, text normalization.
+- 🗄️ `src/vector_store/` — ChromaDB management, naming for model-specific collections.
+- 🛠️ `scripts/` — CLI scripts for processing, migrating, and querying the DB.
+- 🎨 `streamlit_app.py` — web interface to explore searches and switch models.
 
-**📌 Scorci pratici**
+**📌 Quick reference**
 
-- 📚 Collezioni:
+- 📚 Collections:
   - BGE: `document_embeddings_bge_large`
   - Gemma: `document_embeddings_gemma_300m`
-- 📄 File utili: `requirements.txt`, `start_viewer.sh`, `scripts/process_subtitles.py`
+- 📄 Useful files: `requirements.txt`, `start_viewer.sh`, `scripts/process_subtitles.py`
 
-📖 Vuoi andare oltre? Apri `USER_GUIDE.md` per istruzioni tecniche dettagliate, esempi di CLI e snippet per usare le pipeline dal codice Python.
+📖 Want to go deeper? Open `USER_GUIDE.md` for detailed technical instructions, CLI examples, and snippets for using pipelines from Python code.

@@ -1,135 +1,135 @@
-# USER_GUIDE — Guida tecnica per KnowBase
+# USER_GUIDE — Technical Guide for KnowBase
 
-Questa guida spiega come usare KnowBase a livello tecnico: setup, comandi CLI, API Python, gestione modelli e dettagli su come sono organizzate le collezioni di embedding.
+This guide explains how to use KnowBase at a technical level: setup, CLI commands, Python API, model management, and details on how embedding collections are organized.
 
-**Requisiti**
+**Requirements**
 
-- Python 3.9+ (consigliato 3.11)
-- Virtualenv o venv
-- (Opzionale) CUDA / MPS per accelerazione
+- Python 3.9+ (recommended 3.11)
+- Virtualenv or venv
+- (Optional) CUDA / MPS for acceleration
 
-## Configurazione ambiente
+## Environment setup
 
-1. Crea e attiva ambiente virtuale:
+1. Create and activate a virtual environment:
 
 ```
 python -m venv .venv
 source .venv/bin/activate
 ```
 
-2. Installa dipendenze:
+2. Install dependencies:
 
 ```
 pip install -r requirements.txt
 ```
 
-3. Copia l'esempio `.env` e modifica le variabili principali:
+3. Copy the `.env` example and modify main variables:
 
 ```
 cp .env.example .env
 ```
 
-- `MODEL_NAME`: modello di default (es. `BAAI/bge-large-en-v1.5`)
-- `DEVICE`: `cpu`, `cuda`, o `auto`
-- `MODEL_CACHE_DIR`: directory per cache modelli
+- `MODEL_NAME`: default model (e.g., `BAAI/bge-large-en-v1.5`)
+- `DEVICE`: `cpu`, `cuda`, or `auto`
+- `MODEL_CACHE_DIR`: directory for model cache
 
-## Struttura essenziale del progetto
+## Essential project structure
 
 - `src/preprocessing/` — parsing (SRT), cleaning, chunking
-- `src/embeddings/` — adapter dei modelli, gestione del caricamento e pipeline
-- `src/vector_store/` — wrapper per ChromaDB, naming delle collezioni
-- `scripts/` — utilità CLI per processare e interrogare
+- `src/embeddings/` — model adapters, loading management, and pipeline
+- `src/vector_store/` — ChromaDB wrapper, naming for collections
+- `scripts/` — CLI utilities for processing and querying
 
-## Comandi CLI principali
+## Main CLI commands
 
-- Processare una cartella di SRT (usando il modello di default):
+- Process a folder of SRTs (using default model):
 
 ```
 python scripts/process_subtitles.py --input subtitles/ --output data/processed
 ```
 
-- Processare con un modello specifico:
+- Process with a specific model:
 
 ```
 python scripts/process_subtitles.py --input subtitles/ --model "google/embeddinggemma-300m" --output data/processed
 ```
 
-- Eseguire una query testuale tramite script CLI:
+- Execute a text query via CLI script:
 
 ```
-python scripts/query_subtitles.py "come curare un'orchidea?"
+python scripts/query_subtitles.py "how to care for an orchid?"
 ```
 
-Opzioni comuni negli script (se esposte): `--input`, `--output`, `--model`, `--batch-size`, `--device`.
+Common options in scripts (if exposed): `--input`, `--output`, `--model`, `--batch-size`, `--device`.
 
-## Programmatic usage (API Python)
+## Programmatic usage (Python API)
 
-Esempio minimo per ottenere embeddings e salvarli:
+Minimal example to get embeddings and save them:
 
 ```python
 from src.embeddings.pipeline import EmbeddingPipeline
 from src.vector_store.chroma_store import ChromaStore
 
-# Inizializza pipeline con modello specifico
+# Initialize pipeline with specific model
 pipeline = EmbeddingPipeline(model_name="BAAI/bge-large-en-v1.5", device="auto")
 
-# Genera embeddings per una lista di testi
-texts = ["Testo 1", "Testo 2"]
+# Generate embeddings for a list of texts
+texts = ["Text 1", "Text 2"]
 embs = pipeline.embed_batch(texts)
 
-# Salva su Chroma (nome collezione determinato dal modello)
+# Save to Chroma (collection name determined by model)
 store = ChromaStore(model_name=pipeline.model_name)
 store.add_documents(texts, embs, metadatas=[{"source":"demo"}] * len(texts))
 ```
 
-### Note su `EmbeddingPipeline`
+### Notes on `EmbeddingPipeline`
 
-- Gestisce tokenizzazione, chunking (se richiesto) e batching.
-- Supporta caching dei modelli per evitare reload continui.
+- Handles tokenization, chunking (if required), and batching.
+- Supports model caching to avoid continuous reloading.
 
-## Naming delle collezioni Chroma
+## Chroma collection naming
 
-- Convenzione: `document_embeddings_<model_tag>`
-- Esempi:
+- Convention: `document_embeddings_<model_tag>`
+- Examples:
   - BGE: `document_embeddings_bge_large`
   - Gemma: `document_embeddings_gemma_300m`
 
-Questo evita conflitti tra dimensioni diverse e permette confronti incrociati senza sovrascrittura.
+This prevents conflicts between different dimensions and allows cross-model comparisons without overwriting.
 
-## Consigli pratici e troubleshooting
+## Practical tips and troubleshooting
 
-- Se vedi OOM su GPU: prova `DEVICE=cpu` o riduci `--batch-size`.
-- Per test rapidi in locale: usa dimensioni ridotte o subset dei dati.
-- Rimuovere collezioni: usare gli helper in `src/vector_store/` (attenzione: operazione distruttiva).
+- If you see OOM on GPU: try `DEVICE=cpu` or reduce `--batch-size`.
+- For quick local tests: use reduced sizes or data subsets.
+- Removing collections: use helpers in `src/vector_store/` (warning: destructive operation).
 
-## Esempi avanzati
+## Advanced examples
 
-- Valutazione comparativa: processa lo stesso dataset con due modelli diversi e confronta retrieval score o qualitativamente i risultati nel `streamlit_app.py`.
-- Embedding length mismatch: se confronti BGE(1024) con Gemma(768) tieni separate le collezioni e fai analisi dopo normalizzazione o proiezione esterna.
+- Comparative evaluation: process the same dataset with two different models and compare retrieval scores or qualitatively review results in `streamlit_app.py`.
+- Embedding length mismatch: if comparing BGE(1024) with Gemma(768), keep collections separate and perform analysis after normalization or external projection.
 
-## Deploy rapido della UI
+## Quick UI deployment
 
-1. Assicurarsi che il DB vettoriale (Chroma) sia accessibile e persistente in `data/vector_db`.
-2. Avviare la UI:
+1. Ensure the vector DB (Chroma) is accessible and persistent in `data/vector_db`.
+2. Start the UI:
 
 ```
 ./start_viewer.sh
 ```
 
-## Testing e sviluppo
+## Testing and development
 
-- Esegui i test con `pytest`:
+- Run tests with `pytest`:
 
 ```
 pytest -q
 ```
 
-- Aggiungi test per nuove adapter nella cartella `tests/`.
+- Add tests for new adapters in the `tests/` folder.
 
-## Contatti e risorse
+## Contacts and resources
 
-Per estendere il supporto a nuovi modelli, aggiungi un adapter in `src/embeddings/adapters/` e registra il modello in `src/embeddings/model_registry.py`.
+To extend support for new models, add an adapter in `src/embeddings/adapters/` and register the model in `src/embeddings/model_registry.py`.
 
 ---
 
-Se vuoi, posso aggiungere esempi di configurazione `.env`, o generare uno script di deploy Docker/Compose per eseguire la UI e il DB vettoriale in produzione.
+If needed, I can add `.env` configuration examples, or generate a Docker/Compose deployment script to run the UI and vector DB in production.
