@@ -11,12 +11,12 @@ Phase 3 successfully implemented **4 advanced CLI commands** extending KnowBase 
 
 ### Commands Implemented
 
-| Command    | Status | Function | Tests |
-|----------|--------|----------|-------|
-| `ask`     | ✅ Complete | RAG queries with LLM integration, thinking display | Ready |
-| `cluster` | ✅ Complete | HDBSCAN clustering + UMAP, statistics | Tested ✓ |
-| `export`  | ✅ Complete | JSON/CSV export with streaming | Tested ✓ |
-| `reindex` | ✅ Complete | Model migration with collection management | Ready |
+| Command   | Status      | Function                                           | Tests    |
+| --------- | ----------- | -------------------------------------------------- | -------- |
+| `ask`     | ✅ Complete | RAG queries with LLM integration, thinking display | Ready    |
+| `cluster` | ✅ Complete | HDBSCAN clustering + UMAP, statistics              | Tested ✓ |
+| `export`  | ✅ Complete | JSON/CSV export with streaming                     | Tested ✓ |
+| `reindex` | ✅ Complete | Model migration with collection management         | Ready    |
 
 ---
 
@@ -27,6 +27,7 @@ Phase 3 successfully implemented **4 advanced CLI commands** extending KnowBase 
 **Purpose:** Conversational RAG (Retrieval-Augmented Generation) interface for asking questions about the knowledge base.
 
 **Features:**
+
 - Multi-provider LLM support (OpenAI, Anthropic, Groq, Azure, Ollama)
 - Real-time thinking process display with progress tracking
 - Flexible output formats (text, JSON)
@@ -34,12 +35,14 @@ Phase 3 successfully implemented **4 advanced CLI commands** extending KnowBase 
 - Pydantic input validation
 
 **Integration Points:**
+
 - `src.ai_search.graph.build_graph()` - RAG agent pipeline
 - `src.ai_search.thinking` - Thinking status tracking
 - LLM providers via `src.ai_search.llm_factory`
 - Retrieval system for context
 
 **Example Usage:**
+
 ```bash
 knowbase ask "What are best practices for orchid care?"
 knowbase ask "How to grow orchids?" --llm-provider openai --show-thinking
@@ -55,6 +58,7 @@ knowbase ask "..." --top-k 10 --temperature 0.5 --format json
 **Purpose:** Document clustering analysis using HDBSCAN with optional UMAP visualization.
 
 **Features:**
+
 - HDBSCAN density-based clustering
 - Optional UMAP dimensionality reduction (2D projection)
 - Cluster statistics (size, distances, samples)
@@ -63,11 +67,13 @@ knowbase ask "..." --top-k 10 --temperature 0.5 --format json
 - Multiple output formats (text, JSON, table)
 
 **Algorithms Used:**
+
 - **HDBSCAN**: Better than K-means for varied cluster sizes
 - **UMAP**: 2D projection for visualization/exploration
 - **Metrics**: Distance-to-centroid, cluster silhouette
 
 **Example Output:**
+
 ```
 Total documents: 132
 Number of clusters: 4
@@ -81,12 +87,14 @@ Noise Points: Size 71 (53.8%), Avg distance 0.4934
 ```
 
 **Test Results:**
+
 - ✅ Loaded 132 embeddings from ChromaDB
 - ✅ Found 4 clusters + 71 noise points
 - ✅ Statistics computed correctly
 - ✅ Output formats (text, JSON) working
 
 **Example Usage:**
+
 ```bash
 knowbase cluster
 knowbase cluster --min-cluster-size 3
@@ -95,6 +103,7 @@ knowbase cluster --format json > analysis.json
 ```
 
 **Dependencies Added:**
+
 - `hdbscan>=0.8.0` (for clustering)
 - `umap-learn>=0.5.0` (for visualization)
 
@@ -107,6 +116,7 @@ knowbase cluster --format json > analysis.json
 **Purpose:** Export ChromaDB collections to JSON or CSV format with streaming support for large datasets.
 
 **Features:**
+
 - JSON export with optional embedding inclusion
 - CSV export (documents + metadata without embeddings for size efficiency)
 - Streaming/batching support (no memory overload on large datasets)
@@ -115,11 +125,13 @@ knowbase cluster --format json > analysis.json
 - Configurable batch sizes for performance tuning
 
 **Streaming Strategy:**
+
 - Batches documents to avoid loading entire collection in RAM
 - Writes incrementally to file
 - Updates progress every N documents
 
 **Example Output (JSON):**
+
 ```json
 {
   "documents": [
@@ -138,12 +150,14 @@ knowbase cluster --format json > analysis.json
 ```
 
 **Test Results:**
+
 - ✅ Exported 66 chunks successfully
 - ✅ File size: 245 KB (reasonable)
 - ✅ JSON structure valid
 - ✅ All metadata preserved
 
 **Example Usage:**
+
 ```bash
 knowbase export --output documents.json
 knowbase export --output data.csv --format csv
@@ -160,6 +174,7 @@ knowbase export --output batch.json --batch-size 50
 **Purpose:** Reindex all documents with a different embedding model while preserving metadata.
 
 **Features:**
+
 - Model migration support (BAAI → Google or vice versa)
 - Batch processing for efficiency
 - Optional backup notation
@@ -168,6 +183,7 @@ knowbase export --output batch.json --batch-size 50
 - Progress tracking during embedding generation
 
 **Workflow:**
+
 1. Connect to source collection
 2. Retrieve all documents + metadata
 3. Generate new embeddings with target model
@@ -175,6 +191,7 @@ knowbase export --output batch.json --batch-size 50
 5. Batch-add documents with new embeddings
 
 **Example Usage:**
+
 ```bash
 knowbase reindex --new-model BAAI/bge-large-en-v1.5
 knowbase reindex --from-model google/embeddinggemma-300m --new-model BAAI/bge-large
@@ -190,6 +207,7 @@ knowbase reindex --new-model BAAI/bge-large --device mps --batch-size 32
 All Phase 3 commands integrate cleanly with existing components:
 
 ### Dependencies Used
+
 - ✅ `src.utils.config.Config` - Configuration management
 - ✅ `src.vector_store.chroma_manager.ChromaDBManager` - Vector DB access
 - ✅ `src.embeddings.pipeline.EmbeddingPipeline` - Embedding generation
@@ -199,6 +217,7 @@ All Phase 3 commands integrate cleanly with existing components:
 - ✅ Rich - Console output formatting
 
 ### No Breaking Changes
+
 - ✅ All existing Phase 2 commands (load, search, info) unchanged
 - ✅ Python API imports still work
 - ✅ Streamlit UI unaffected
@@ -209,21 +228,24 @@ All Phase 3 commands integrate cleanly with existing components:
 ## Testing Summary
 
 ### Command Testing
-| Command | Test Case | Result |
-|---------|-----------|--------|
+
+| Command | Test Case              | Result                         |
+| ------- | ---------------------- | ------------------------------ |
 | cluster | `--min-cluster-size 3` | ✅ Found 4 clusters + 71 noise |
-| cluster | `--format text` | ✅ Pretty output |
-| export | `--output test.json` | ✅ 245 KB file created |
-| export | JSON structure | ✅ Valid with all metadata |
-| ask | `--help` | ✅ Shows all options |
-| reindex | `--help` | ✅ Shows all options |
+| cluster | `--format text`        | ✅ Pretty output               |
+| export  | `--output test.json`   | ✅ 245 KB file created         |
+| export  | JSON structure         | ✅ Valid with all metadata     |
+| ask     | `--help`               | ✅ Shows all options           |
+| reindex | `--help`               | ✅ Shows all options           |
 
 ### Hardware Compatibility
+
 - ✅ Apple Silicon (MPS) support via device resolution
 - ✅ Multi-threaded processing (12 workers detected)
 - ✅ Memory-efficient streaming for large exports
 
 ### Error Handling
+
 - ✅ Missing API keys handled gracefully
 - ✅ Invalid model names validated via Pydantic
 - ✅ File overwrite confirmation in export
@@ -234,15 +256,18 @@ All Phase 3 commands integrate cleanly with existing components:
 ## Files Created/Modified
 
 ### New Files (650+ lines)
+
 - `src/cli/commands/ask.py` (325 lines) - RAG command
 - `src/cli/commands/cluster.py` (310 lines) - Clustering command
 - `src/cli/commands/export.py` (280 lines) - Export command
 - `src/cli/commands/reindex.py` (290 lines) - Reindex command
 
 ### Modified Files
+
 - `src/cli/main.py` - Added 4 new command imports + registration
 
 ### Configuration Used
+
 - `src/utils/config.Config` - VECTOR_DB_PATH, DEVICE detection
 - Pydantic models for input validation (AskCommandInput, ClusterCommandInput, etc.)
 
@@ -266,6 +291,7 @@ knowbase
 ## Dependencies Added to Project
 
 For Phase 3 functionality (optional, added to requirements):
+
 ```
 hdbscan>=0.8.0       # For clustering
 umap-learn>=0.5.0    # For visualization
@@ -278,17 +304,20 @@ umap-learn>=0.5.0    # For visualization
 ## Performance Characteristics
 
 ### Cluster Command
+
 - **Load embeddings:** <1 second (132 vectors)
 - **HDBSCAN clustering:** ~2 seconds
 - **UMAP projection:** ~3 seconds (if enabled)
 - **Total:** ~5 seconds for 132 documents
 
-### Export Command  
+### Export Command
+
 - **Retrieve from DB:** ~1 second (66 chunks)
 - **Write to JSON:** ~2 seconds (incremental)
 - **Total:** ~3 seconds, 245 KB output
 
 ### Ask Command (pending full test)
+
 - **Query embedding:** ~2 seconds
 - **Retrieval:** ~1 second
 - **LLM generation:** Depends on provider (typically 5-20 seconds)
@@ -345,6 +374,7 @@ umap-learn>=0.5.0    # For visualization
 ## Git Commit
 
 Ready to commit with message:
+
 ```
 feat: Phase 3 complete - ask, cluster, export, reindex commands fully functional
 
