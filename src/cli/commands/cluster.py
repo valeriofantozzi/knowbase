@@ -9,6 +9,7 @@ Usage:
     knowbase cluster --model BAAI/bge-large-en-v1.5 --format table
     knowbase cluster --export-umap clusters.json
     knowbase cluster --min-cluster-size 5 --format json
+    knowbase cluster --use-reduction --n-components 10
 """
 
 import sys
@@ -23,6 +24,7 @@ from src.utils.config import Config
 from src.vector_store.chroma_manager import ChromaDBManager
 from src.embeddings.model_loader import ModelLoader
 from src.cli.utils.output import console, print_error, print_success
+from src.clustering.pipeline import ClusteringPipeline, ClusteringResult
 
 
 class ClusterCommandInput(BaseModel):
@@ -30,6 +32,8 @@ class ClusterCommandInput(BaseModel):
     model: str = Field(default="BAAI/bge-large-en-v1.5", description="Embedding model")
     min_cluster_size: int = Field(default=5, ge=2, le=100, description="Minimum cluster size")
     min_samples: int = Field(default=5, ge=1, le=50, description="Minimum samples")
+    use_reduction: bool = Field(default=True, description="Use dimensionality reduction")
+    n_components: int = Field(default=10, ge=2, le=100, description="Number of reduced dimensions")
     export_umap: Optional[Path] = Field(None, description="Export UMAP projection")
     export_metadata: Optional[Path] = Field(None, description="Export cluster metadata")
 
@@ -54,6 +58,18 @@ class ClusterCommandInput(BaseModel):
     type=int,
     default=5,
     help="Minimum samples for HDBSCAN",
+    metavar="INT",
+)
+@click.option(
+    "--use-reduction/--no-reduction",
+    default=True,
+    help="Use dimensionality reduction (UMAP/PCA) before clustering",
+)
+@click.option(
+    "--n-components",
+    type=int,
+    default=10,
+    help="Number of dimensions for reduction",
     metavar="INT",
 )
 @click.option(
@@ -93,6 +109,8 @@ def cluster(
     model: str,
     min_cluster_size: int,
     min_samples: int,
+    use_reduction: bool,
+    n_components: int,
     export_umap: Optional[str],
     export_metadata: Optional[str],
     format: str,
@@ -118,6 +136,8 @@ def cluster(
                 model=model,
                 min_cluster_size=min_cluster_size,
                 min_samples=min_samples,
+                use_reduction=use_reduction,
+                n_components=n_components,
                 export_umap=Path(export_umap) if export_umap else None,
                 export_metadata=Path(export_metadata) if export_metadata else None,
             )
@@ -154,25 +174,35 @@ def cluster(
 
         if verbose:
             console.print(f"[dim]Loaded {len(embeddings)} embeddings[/dim]")
+            
+        # Get documents for topic modeling
+        documents = embeddings_data.get("documents", [])
+        if not documents or all(not d for d in documents):
+            if verbose:
+                console.print("[yellow]No documents found, topic names will be generic[/yellow]")
+            documents = None
 
-        # Perform clustering
+        # Perform clustering pipeline
         if verbose:
-            console.print("[dim]Performing clustering with HDBSCAN...[/dim]")
+            console.print("[dim]Running clustering pipeline...[/dim]")
 
-        try:
-            import hdbscan
-        except ImportError:
-            print_error("hdbscan not installed. Install with: pip install hdbscan")
-            sys.exit(1)
-
-        clusterer = hdbscan.HDBSCAN(
+        pipeline = ClusteringPipeline(
             min_cluster_size=cluster_input.min_cluster_size,
             min_samples=cluster_input.min_samples,
-            metric="euclidean",
+            metric="cosine",  # Pipeline handles reduction logic
+            use_reduction=cluster_input.use_reduction,
+            reduction_components=cluster_input.n_components,
+            extract_topics=True
         )
-        labels = clusterer.fit_predict(embeddings)
-
-        # Compute cluster statistics
+        
+        result = pipeline.fit_predict(embeddings, documents)
+        
+        labels = result.labels
+        
+        # Compute cluster statistics (using original embeddings for distances if desired, or reduced?)
+        # Let's keep using original for stats to matching previous behavior, 
+        # or we could use reduced. For now, original is safer for "distance to centroid" interpretation in high dim.
+        
         unique_labels = set(labels)
         n_clusters = len(unique_labels) - (1 if -1 in unique_labels else 0)
         n_noise = list(labels).count(-1)
@@ -181,27 +211,35 @@ def cluster(
             console.print(f"[dim]Found {n_clusters} clusters[/dim]")
 
         cluster_stats = _compute_cluster_stats(
-            embeddings, labels, metadatas, ids
+            embeddings, labels, metadatas, ids, result.topics, result.cluster_names
         )
 
-        # Optionally compute UMAP projection
+        # Optionally compute UMAP projection (for export only)
+        # Note: If pipeline used reduction, result.reduced_embeddings might be available
+        # But if we want 2D for export, we might need to re-run UMAP to 2D if reduction was to >2D
         umap_data = None
         if cluster_input.export_umap:
             if verbose:
-                console.print("[dim]Computing UMAP projection...[/dim]")
+                console.print("[dim]Computing 2D UMAP projection for export...[/dim]")
             try:
                 import umap
-            except ImportError:
-                print_error("umap not installed. Install with: pip install umap-learn")
-                sys.exit(1)
-
-            reducer = umap.UMAP(n_components=2, metric="euclidean", random_state=42)
-            umap_projection = reducer.fit_transform(embeddings)
-            umap_data = {
-                "points": umap_projection.tolist(),
-                "labels": labels.tolist(),
-                "ids": ids,
-            }
+                reducer_2d = umap.UMAP(n_components=2, metric="cosine", random_state=42)
+                umap_projection = reducer_2d.fit_transform(embeddings)
+                
+                umap_data = {
+                    "points": umap_projection.tolist(),
+                    "labels": labels.tolist(),
+                    "ids": ids,
+                    "names": [result.cluster_names.get(l, f"Cluster {l}") for l in labels]
+                }
+            except Exception as e:
+                print_error(f"Failed to compute 2D UMAP: {e}")
+                
+        # Output results
+        if format.lower() == "json":
+            _output_json_format(cluster_stats, umap_data)
+        else:
+            _output_text_format(cluster_stats, n_clusters, n_noise, verbose)
 
         # Output results
         if format.lower() == "json":
@@ -238,6 +276,8 @@ def _compute_cluster_stats(
     labels: np.ndarray,
     metadatas: List[Dict],
     ids: List[str],
+    topics: Optional[Dict[int, List[Tuple[str, float]]]] = None,
+    cluster_names: Optional[Dict[int, str]] = None
 ) -> Dict[str, Any]:
     """Compute statistics for each cluster."""
     stats = {
@@ -263,16 +303,20 @@ def _compute_cluster_stats(
             avg_distance = 0.0
             max_distance = 0.0
 
-        cluster_name = (
-            f"Cluster {label}" if label >= 0 else "Noise Points"
-        )
+        name = "Noise Points"
+        if label >= 0:
+            name = f"Cluster {label}"
+            if cluster_names and label in cluster_names:
+                name = f"{cluster_names[label]} ({label})"
 
-        stats["clusters"][cluster_name] = {
+        stats["clusters"][name] = {
             "label": int(label),
+            "name": cluster_names.get(label, f"Cluster {label}") if cluster_names else str(label),
             "size": int(size),
             "percentage": float(size / len(embeddings) * 100),
             "avg_distance_to_centroid": avg_distance,
             "max_distance_to_centroid": max_distance,
+            "keywords": [k[0] for k in topics.get(label, [])[:5]] if topics else [],
             "sample_documents": [
                 {
                     "id": cluster_ids[i],
@@ -308,6 +352,8 @@ def _output_text_format(
         percentage = cluster_data["percentage"]
 
         console.print(f"\n  {cluster_name}:")
+        if cluster_data.get("keywords"):
+             console.print(f"    Topic: {', '.join(cluster_data['keywords'])}")
         console.print(f"    Size: {size} ({percentage:.1f}%)")
         console.print(
             f"    Avg distance to centroid: {cluster_data['avg_distance_to_centroid']:.4f}"

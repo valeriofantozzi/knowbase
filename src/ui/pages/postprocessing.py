@@ -214,41 +214,39 @@ def render_visualization_tab() -> None:
     with col3:
         dimensions = st.radio("Dimensions", ["2D", "3D"], horizontal=True)
 
-    color_option = st.selectbox(
-        "Color by", ["Source ID", "Date", "Cluster", "None"], index=0
-    )
-
     # Generate visualization button
     if st.button(
         f"{ICONS['chart']} Generate Visualization",
         type="primary",
         use_container_width=True,
     ):
-        generate_visualization(
+        compute_visualization_data(
             num_points=num_points,
             reduction_method=reduction_method,
             dimensions=dimensions,
-            color_option=color_option,
         )
 
+    # Render plot if data is available
+    if "viz_data" in st.session_state:
+        render_visualization_plot()
 
-def generate_visualization(
-    num_points: int, reduction_method: str, dimensions: str, color_option: str
+
+def compute_visualization_data(
+    num_points: int, 
+    reduction_method: str, 
+    dimensions: str
 ) -> None:
     """
-    Generate and display visualization.
+    Compute visualization data (fetch + reduce) and store in session state.
 
     Args:
-        num_points: Number of points to visualize
-        reduction_method: Dimensionality reduction method
-        dimensions: "2D" or "3D"
-        color_option: How to color points
+        num_points: Number of points
+        reduction_method: UMAP/PCA/t-SNE
+        dimensions: 2D or 3D
     """
-    with st.spinner(
-        f"Generating {dimensions} visualization with {num_points} points..."
-    ):
+    with st.spinner(f"Computing {dimensions} space with {reduction_method}..."):
         try:
-            # Get data
+             # Get data
             sample = st.session_state.collection.get(
                 limit=num_points, include=["embeddings", "metadatas", "documents"]
             )
@@ -300,139 +298,210 @@ def generate_visualization(
                 reducer = PCA(n_components=n_components, random_state=42)
                 reduced = reducer.fit_transform(embeddings_array)
 
-            progress.progress(0.8, text="Preparing visualization...")
-
-            # Prepare colors
-            if color_option == "Source ID":
-                colors = [
-                    m.get("source_id", "unknown") if m else "unknown" for m in metadatas
-                ]
-            elif color_option == "Date":
-                colors = [
-                    m.get("date", "unknown") if m else "unknown" for m in metadatas
-                ]
-            elif color_option == "Cluster":
-                colors = st.session_state.get("cluster_labels")
-                if colors is None:
-                    colors = ["No clusters"] * len(embeddings)
-                else:
-                    colors = [
-                        f"Cluster {c}" if c >= 0 else "Outlier"
-                        for c in colors[: len(embeddings)]
-                    ]
-            else:
-                colors = None
-
-            # Create hover text
-            hover_texts = []
-            for meta, doc in zip(metadatas, documents):
-                parts = []
-                if meta:
-                    if "title" in meta:
-                        parts.append(f"Title: {meta['title'][:50]}")
-                    if "source_id" in meta:
-                        parts.append(f"Source: {meta['source_id']}")
-                    if "date" in meta:
-                        parts.append(f"Date: {meta['date']}")
-                parts.append(f"Text: {doc[:100]}...")
-                hover_texts.append("<br>".join(parts))
-
-            # Create plot
-            if dimensions == "3D":
-                fig = go.Figure(
-                    data=go.Scatter3d(
-                        x=reduced[:, 0],
-                        y=reduced[:, 1],
-                        z=reduced[:, 2],
-                        mode="markers",
-                        marker=dict(
-                            size=5,
-                            color=[hash(c) % 256 for c in colors] if colors else "blue",
-                            colorscale="Viridis" if colors else None,
-                            opacity=0.7,
-                            line=dict(width=0.5, color="white"),
-                        ),
-                        text=hover_texts,
-                        hovertemplate="<b>%{text}</b><extra></extra>",
-                        name="Embeddings",
-                    )
-                )
-
-                fig.update_layout(
-                    title=f"3D Embedding Space ({reduction_method}) - {num_points} points",
-                    scene=dict(
-                        xaxis_title="Dimension 1",
-                        yaxis_title="Dimension 2",
-                        zaxis_title="Dimension 3",
-                    ),
-                    height=700,
-                )
-            else:
-                # 2D plot
-                df = pd.DataFrame(
-                    {
-                        "x": reduced[:, 0],
-                        "y": reduced[:, 1],
-                        "color": colors if colors else "All",
-                        "hover": hover_texts,
-                    }
-                )
-
-                fig = px.scatter(
-                    df,
-                    x="x",
-                    y="y",
-                    color="color" if colors else None,
-                    hover_data={"hover": True, "x": False, "y": False, "color": False},
-                    title=f"2D Embedding Space ({reduction_method}) - {num_points} points",
-                )
-                fig.update_layout(height=600)
-                fig.update_traces(marker=dict(size=6, opacity=0.7))
-
-            progress.progress(1.0, text="✅ Visualization complete")
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Store reduced embeddings for potential clustering
-            if dimensions == "2D":
-                st.session_state["reduced_embeddings_2d"] = reduced
-            else:
-                st.session_state["reduced_embeddings_3d"] = reduced
-
-            # Statistics
-            st.subheader(f"{ICONS['chart']} Visualization Statistics")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Points visualized", num_points)
-            with col2:
-                st.metric("Original dimensions", embeddings_array.shape[1])
-            with col3:
-                st.metric("Reduced dimensions", n_components)
-
-            # Download coordinates
-            coords_df = pd.DataFrame(
-                {
-                    "ID": ids,
-                    "X": reduced[:, 0],
-                    "Y": reduced[:, 1],
-                }
-            )
-            if dimensions == "3D":
-                coords_df["Z"] = reduced[:, 2]
-            coords_df["Source_ID"] = [
-                m.get("source_id", "") if m else "" for m in metadatas
-            ]
-            coords_df["Date"] = [m.get("date", "") if m else "" for m in metadatas]
-
-            st.download_button(
-                label=f"{ICONS['download']} Download Coordinates (CSV)",
-                data=coords_df.to_csv(index=False),
-                file_name=f"embedding_{dimensions.lower()}_coordinates.csv",
-                mime="text/csv",
-            )
+            progress.progress(1.0, text="✅ Computation complete")
+            
+            # Store in session state
+            st.session_state["viz_data"] = {
+                "reduced": reduced,
+                "ids": ids,
+                "metadatas": metadatas,
+                "documents": documents,
+                "dimensions": dimensions,
+                "method": reduction_method,
+                "num_points": num_points,
+                "original_dim": embeddings_array.shape[1]
+            }
+            st.rerun()
 
         except Exception as e:
-            st.error(f"Error generating visualization: {e}")
+            st.error(f"Error computing visualization: {e}")
             st.exception(e)
+
+
+def render_visualization_plot() -> None:
+    """Render the interactive visualization plot from stored data."""
+    data = st.session_state["viz_data"]
+    reduced = data["reduced"]
+    ids = data["ids"]
+    metadatas = data["metadatas"]
+    documents = data["documents"]
+    dimensions = data["dimensions"]
+    
+    # 1. Controls Row (Filter & Color)
+    col1, col2 = st.columns([2, 1])
+    
+    filtered_indices = list(range(len(ids))) # Default: all
+    
+    with col1:
+        # Filter by cluster (if available)
+        cluster_results = st.session_state.get("cluster_results")
+        cluster_labels = st.session_state.get("cluster_labels")
+        cluster_chunk_ids = st.session_state.get("cluster_chunk_ids")
+        
+        # Create ID map
+        id_to_label = {}
+        if cluster_chunk_ids and cluster_labels is not None:
+             id_to_label = dict(zip(cluster_chunk_ids, cluster_labels))
+
+        if cluster_labels is not None:
+            unique_labels = sorted(list(set(cluster_labels)))
+            cluster_options = []
+            cluster_map = {} # Display Name -> ID
+            
+            for lbl in unique_labels:
+                if lbl == -1:
+                    name = "Outlier"
+                else:
+                    name = f"Cluster {lbl}"
+                    if cluster_results and cluster_results.cluster_names and lbl in cluster_results.cluster_names:
+                        name = f"{cluster_results.cluster_names[lbl]} ({lbl})"
+                
+                cluster_options.append(name)
+                cluster_map[name] = lbl
+                
+            selected_clusters = st.multiselect(
+                "Filter by Cluster",
+                options=cluster_options,
+                default=[],
+                help="Show points only from selected clusters"
+            )
+            
+            if selected_clusters:
+                target_labels = set([cluster_map[s] for s in selected_clusters])
+                # Filter indices
+                filtered_indices = []
+                for i, cid in enumerate(ids):
+                    lbl = id_to_label.get(cid)
+                    if lbl in target_labels:
+                        filtered_indices.append(i)
+                        
+                if not filtered_indices:
+                     st.warning("No points found for selected clusters in the current sample.")
+
+    with col2:
+        color_option = st.selectbox(
+            "Color by", ["Cluster", "Source ID", "Date", "None"], index=0
+        )
+
+    # 2. Prepare Data for Plotting (Filtered)
+    if not filtered_indices:
+        return
+
+    plot_reduced = reduced[filtered_indices]
+    plot_metadatas = [metadatas[i] for i in filtered_indices]
+    plot_documents = [documents[i] for i in filtered_indices]
+    plot_ids = [ids[i] for i in filtered_indices]
+    
+    # Prepare Colors
+    colors = None
+    if color_option == "Source ID":
+        colors = [m.get("source_id", "unknown") if m else "unknown" for m in plot_metadatas]
+    elif color_option == "Date":
+        colors = [m.get("date", "unknown") if m else "unknown" for m in plot_metadatas]
+    elif color_option == "Cluster":
+        colors = []
+        for cid in plot_ids:
+            label = id_to_label.get(cid)
+            if label is None:
+                    colors.append("Unknown")
+            elif label == -1:
+                colors.append("Outlier")
+            else:
+                if cluster_results and cluster_results.cluster_names and label in cluster_results.cluster_names:
+                        colors.append(f"{cluster_results.cluster_names[label]} ({label})")
+                else:
+                        colors.append(f"Cluster {label}")
+    
+    # Prepare Hover
+    hover_texts = []
+    for i, (meta, doc) in enumerate(zip(plot_metadatas, plot_documents)):
+        parts = []
+        if meta:
+            if "title" in meta:
+                parts.append(f"Title: {meta['title'][:50]}")
+            if "source_id" in meta:
+                parts.append(f"Source: {meta['source_id']}")
+            if "date" in meta:
+                parts.append(f"Date: {meta['date']}")
+        
+        cid = plot_ids[i]
+        if cid in id_to_label:
+            lbl = id_to_label[cid]
+            c_name = "Outlier" if lbl == -1 else f"Cluster {lbl}"
+            if lbl != -1 and cluster_results and cluster_results.cluster_names and lbl in cluster_results.cluster_names:
+                 c_name = f"{cluster_results.cluster_names[lbl]} ({lbl})"
+            parts.append(f"Cluster: {c_name}")
+            
+        parts.append(f"Text: {doc[:100]}...")
+        hover_texts.append("<br>".join(parts))
+
+    # 3. Render Plot
+    if dimensions == "3D":
+        fig = go.Figure(
+            data=go.Scatter3d(
+                x=plot_reduced[:, 0],
+                y=plot_reduced[:, 1],
+                z=plot_reduced[:, 2],
+                mode="markers",
+                marker=dict(
+                    size=5,
+                    color=[hash(c) % 256 for c in colors] if colors else "blue",
+                    colorscale="Viridis" if colors else None,
+                    opacity=0.7,
+                    line=dict(width=0.5, color="white"),
+                ),
+                text=hover_texts,
+                hovertemplate="<b>%{text}</b><extra></extra>",
+                name="Embeddings",
+            )
+        )
+        fig.update_layout(
+            title=f"3D Space ({data['method']}) - {len(plot_reduced)} points",
+            scene=dict(xaxis_title="Dim 1", yaxis_title="Dim 2", zaxis_title="Dim 3"),
+            height=700,
+        )
+    else:
+        df = pd.DataFrame({
+            "x": plot_reduced[:, 0],
+            "y": plot_reduced[:, 1],
+            "color": colors if colors else "All",
+            "hover": hover_texts
+        })
+        fig = px.scatter(
+            df, x="x", y="y", color="color" if colors else None,
+            hover_data={"hover": True, "x": False, "y": False, "color": False},
+            title=f"2D Space ({data['method']}) - {len(plot_reduced)} points",
+        )
+        fig.update_layout(height=600)
+        fig.update_traces(marker=dict(size=6, opacity=0.7))
+
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # 4. Statistics
+    st.subheader(f"{ICONS['chart']} Visualization Statistics")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Points visualized", len(plot_reduced))
+    with col2:
+        st.metric("Original Data Points", data["num_points"])
+    with col3:
+        st.metric("Reduced dimensions", 3 if dimensions == "3D" else 2)
+
+    # 5. Download
+    coords_df = pd.DataFrame({
+        "ID": plot_ids,
+        "X": plot_reduced[:, 0],
+        "Y": plot_reduced[:, 1],
+    })
+    if dimensions == "3D":
+        coords_df["Z"] = plot_reduced[:, 2]
+    
+    st.download_button(
+        label=f"{ICONS['download']} Download Coordinates (CSV)",
+        data=coords_df.to_csv(index=False),
+        file_name=f"embedding_{dimensions.lower()}_coordinates.csv",
+        mime="text/csv",
+    )
 
 
 def render_clustering_tab() -> None:
@@ -445,6 +514,43 @@ def render_clustering_tab() -> None:
             f"Currently have {total_docs} documents."
         )
         return
+
+    # Attempt to load existing results if not present
+    if st.session_state.get("cluster_results") is None:
+        try:
+            from ...clustering.cluster_manager import ClusterManager
+            
+            # Use the active collection name
+            collection_name = None
+            if "collection" in st.session_state and st.session_state.collection:
+                collection_name = st.session_state.collection.name
+                
+            manager = ClusterManager(collection_name=collection_name)
+            # Try to load
+            loaded_result = manager.load_clustering_results(limit=5000)
+            if loaded_result:
+                st.session_state["cluster_results"] = loaded_result
+                st.session_state["cluster_labels"] = loaded_result.labels
+                # Populate chunk_ids and metadatas to support UI interactions
+                # Ideally, we should fetch these properly or have load_clustering_results return them.
+                # Since we fetched a sample in load_clustering_results, let's minimally ensure
+                # we don't crash. But for full functionality (Highlighting, Filtering), 
+                # we rely on st.session_state.collection.get() which was likely done elsewhere 
+                # OR we might see a mismatch. 
+                # For now, let's assume the user doesn't need perfect sync of the *exact* sample unless they re-run.
+                # However, the Visualization tab uses 'viz_data'.
+                
+                # Fetch data to populate support variables for the list view
+                sample = st.session_state.collection.get(
+                   limit=5000,
+                   include=["metadatas", "documents", "embeddings"]
+                )
+                st.session_state["cluster_chunk_ids"] = sample["ids"]
+                st.session_state["cluster_metadatas"] = sample["metadatas"]
+                
+                st.success("Loaded saved clustering results from database.")
+        except Exception as e:
+            st.warning(f"Could not load saved clustering results: {e}")
 
     # Clustering parameters
     st.subheader(f"{ICONS['settings']} Clustering Parameters")
@@ -509,57 +615,66 @@ def render_clustering_tab() -> None:
         save_clustering = st.button(
             f"{ICONS['download']} Save to DB",
             use_container_width=True,
-            disabled=st.session_state.get("cluster_labels") is None,
+            disabled=st.session_state.get("cluster_results") is None,
         )
 
     # Run clustering
     if run_clustering:
         perform_clustering(min_cluster_size, min_samples, metric)
+        
+    # Save clustering
+    if save_clustering:
+        save_clustering_to_db()
 
     # Display results if available
-    if st.session_state.get("cluster_labels") is not None:
+    if st.session_state.get("cluster_results") is not None:
         render_clustering_results()
 
 
 def perform_clustering(min_cluster_size: int, min_samples: int, metric: str) -> None:
     """
-    Perform HDBSCAN clustering.
+    Perform clustering using the pipeline.
 
     Args:
         min_cluster_size: Minimum cluster size
         min_samples: Min samples for core point
         metric: Distance metric
     """
-    with st.spinner("Running HDBSCAN clustering..."):
+    with st.spinner("Running Clustering Pipeline (Reduction + HDBSCAN + Topic Extraction)..."):
         try:
-            from ...clustering.hdbscan_clusterer import HDBSCANClusterer
+            from ...clustering.pipeline import ClusteringPipeline
             from ...clustering.cluster_evaluator import ClusterEvaluator
 
-            # Get embeddings
+            # Get embeddings and documents
             sample = st.session_state.collection.get(
                 limit=min(5000, st.session_state.total_docs),
-                include=["embeddings", "metadatas"],
+                include=["embeddings", "metadatas", "documents"],
             )
 
             embeddings = np.array(sample["embeddings"])
+            documents = sample.get("documents", [])
 
-            # Run HDBSCAN
-            clusterer = HDBSCANClusterer(
+            # Run Pipeline
+            pipeline = ClusteringPipeline(
                 min_cluster_size=min_cluster_size,
                 min_samples=min_samples,
                 metric=metric,
+                use_reduction=True, # Always use reduction for better results
+                reduction_components=10,
+                extract_topics=True
             )
 
-            labels, probabilities = clusterer.fit(embeddings)
+            result = pipeline.fit_predict(embeddings, documents)
 
             # Store results
-            st.session_state["cluster_labels"] = labels
-            st.session_state["cluster_probabilities"] = probabilities
+            st.session_state["cluster_results"] = result
+            st.session_state["cluster_labels"] = result.labels
             st.session_state["cluster_metadatas"] = sample["metadatas"]
+            st.session_state["cluster_chunk_ids"] = sample["ids"]
 
             # Evaluate clustering
             evaluator = ClusterEvaluator()
-            metrics = evaluator.evaluate(embeddings, labels, metric)
+            metrics = evaluator.evaluate(embeddings, result.labels, metric)
             st.session_state["cluster_metrics"] = metrics
 
             # Update params
@@ -569,16 +684,42 @@ def perform_clustering(min_cluster_size: int, min_samples: int, metric: str) -> 
                 "metric": metric,
             }
 
-            st.success(f"✅ Clustering complete! Found {metrics.n_clusters} clusters.")
+            st.success(f"✅ Clustering complete! Found {len(result.topics)} topics.")
             st.rerun()
 
         except Exception as e:
             st.error(f"Clustering failed: {e}")
             st.exception(e)
 
+def save_clustering_to_db() -> None:
+    """Save clustering results to ChromaDB."""
+    with st.spinner("Saving clustering results to database..."):
+        try:
+            from ...clustering.cluster_manager import ClusterManager
+            
+            cluster_manager = ClusterManager(
+                collection_name=st.session_state.collection.name
+            )
+            
+            chunk_ids = st.session_state.get("cluster_chunk_ids", [])
+            result = st.session_state.get("cluster_results")
+            
+            if not chunk_ids or not result:
+                st.error("No clustering results to save.")
+                return
+                
+            count = cluster_manager.store_clustering_results(chunk_ids, result)
+            
+            st.success(f"✅ Successfully saved results for {count} documents!")
+            
+        except Exception as e:
+            st.error(f"Failed to save results: {e}")
+            st.exception(e)
+
 
 def render_clustering_results() -> None:
     """Render clustering results."""
+    result = st.session_state.get("cluster_results")
     labels = st.session_state.get("cluster_labels")
     metrics = st.session_state.get("cluster_metrics")
     metadatas = st.session_state.get("cluster_metadatas", [])
@@ -607,18 +748,55 @@ def render_clustering_results() -> None:
                 "Davies-Bouldin", f"{metrics.davies_bouldin_index:.3f}", icon="📈"
             )
 
-    # Cluster size distribution
-    st.subheader("📊 Cluster Size Distribution")
+    # Cluster list details
+    st.subheader("📋 Cluster Details")
 
     cluster_sizes = Counter(labels)
     # Remove outliers from count display
     if -1 in cluster_sizes:
         del cluster_sizes[-1]
+    
+    cluster_data_list = []
+    unique_labels = sorted(list(set(labels)))
+    
+    for label in unique_labels:
+        if label == -1: 
+            continue
+            
+        name = f"Cluster {label}"
+        keywords = []
+        if result and result.cluster_names and label in result.cluster_names:
+            name = result.cluster_names[label]
+        
+        if result and result.topics and label in result.topics:
+            keywords = [k[0] for k in result.topics[label][:5]]
+            
+        cluster_data_list.append({
+            "ID": label,
+            "Name": name,
+            "Size": cluster_sizes[label],
+            "Top Keywords": ", ".join(keywords)
+        })
+        
+    if cluster_data_list:
+        st.dataframe(
+            pd.DataFrame(cluster_data_list),
+            column_config={
+                "ID": st.column_config.NumberColumn("ID", width="small"),
+                "Name": st.column_config.TextColumn("Topic Name", width="medium"),
+                "Size": st.column_config.ProgressColumn("Size", format="%d", min_value=0, max_value=max(cluster_sizes.values())),
+                "Top Keywords": st.column_config.TextColumn("Keywords", width="large"),
+            },
+            hide_index=True,
+            use_container_width=True
+        )
 
+    # Cluster size distribution (Visual)
+    st.subheader("📊 Cluster Distribution")
     if cluster_sizes:
         size_df = pd.DataFrame(
             [
-                {"Cluster": f"Cluster {k}", "Size": v}
+                {"Cluster": result.cluster_names.get(k, f"Cluster {k}") if result and result.cluster_names else f"Cluster {k}" , "Size": v}
                 for k, v in sorted(cluster_sizes.items(), key=lambda x: -x[1])
             ]
         )
@@ -634,15 +812,34 @@ def render_clustering_results() -> None:
 
     # Cluster exploration
     with st.expander(f"{ICONS['search']} Explore Cluster Contents", expanded=False):
-        cluster_options = [f"Cluster {i}" for i in sorted(set(labels)) if i >= 0]
+        cluster_ids = sorted(set(labels))
+        # Use semantic names for selection box
+        cluster_options = []
+        for i in cluster_ids:
+            if i >= 0:
+                name = f"Cluster {i}"
+                if result and result.cluster_names and i in result.cluster_names:
+                    name = f"{result.cluster_names[i]} ({i})"
+                cluster_options.append(name)
+        
         if cluster_options:
-            selected_cluster = st.selectbox("Select Cluster", options=cluster_options)
+            selected_option = st.selectbox("Select Cluster", options=cluster_options)
 
-            cluster_idx = int(selected_cluster.split()[-1])
+            # Parse back ID from "Name (ID)" or "Cluster ID"
+            if "(" in selected_option and selected_option.endswith(")"):
+                cluster_idx = int(selected_option.split("(")[-1].strip(")"))
+            else:
+                cluster_idx = int(selected_option.split()[-1])
+            
+            # Show Keywords
+            if result and result.topics and cluster_idx in result.topics:
+                keywords = [k[0] for k in result.topics[cluster_idx][:10]]
+                st.info(f"**Keywords:** {', '.join(keywords)}")
+
             cluster_mask = labels == cluster_idx
             cluster_docs_idx = np.where(cluster_mask)[0][:10]  # First 10
 
-            st.write(f"**Sample documents from {selected_cluster}:**")
+            st.write(f"**Sample documents from {selected_option}:**")
             for idx in cluster_docs_idx:
                 if idx < len(metadatas):
                     meta = metadatas[idx]

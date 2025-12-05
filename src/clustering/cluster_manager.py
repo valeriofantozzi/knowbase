@@ -4,12 +4,13 @@ Cluster Manager Module
 Manages cluster storage, updates, and queries in ChromaDB.
 """
 
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 from dataclasses import dataclass
 import numpy as np
 
 from ..vector_store.chroma_manager import ChromaDBManager
 from ..utils.logger import get_logger
+from .pipeline import ClusteringResult
 
 
 @dataclass
@@ -21,6 +22,7 @@ class ClusterMetadata:
     """
     cluster_id: int
     size: int
+    name: Optional[str] = None
     centroid: Optional[np.ndarray] = None
     keywords: Optional[List[str]] = None
     theme: Optional[str] = None
@@ -31,6 +33,7 @@ class ClusterMetadata:
         return {
             "cluster_id": self.cluster_id,
             "size": self.size,
+            "name": self.name,
             "centroid": self.centroid.tolist() if self.centroid is not None else None,
             "keywords": self.keywords or [],
             "theme": self.theme,
@@ -49,22 +52,25 @@ class ClusterManager:
     - Cluster statistics
     """
     
-    def __init__(self, chroma_manager: Optional[ChromaDBManager] = None):
+    def __init__(self, chroma_manager: Optional[ChromaDBManager] = None, collection_name: Optional[str] = None):
         """
         Initialize cluster manager.
         
         Args:
             chroma_manager: ChromaDBManager instance (creates default if None)
+            collection_name: Optional name of the collection to manage
         """
         self.logger = get_logger(__name__)
         self.chroma_manager = chroma_manager or ChromaDBManager()
-        self.collection = self.chroma_manager.get_or_create_collection()
+        self.collection = self.chroma_manager.get_or_create_collection(name=collection_name)
     
     def store_cluster_labels(
         self,
         chunk_ids: List[str],
         labels: np.ndarray,
-        probabilities: Optional[np.ndarray] = None
+        probabilities: Optional[np.ndarray] = None,
+        cluster_names: Optional[Dict[int, str]] = None,
+        topics: Optional[Dict[int, List[Tuple[str, float]]]] = None
     ) -> int:
         """
         Store cluster labels in ChromaDB metadata.
@@ -73,6 +79,8 @@ class ClusterManager:
             chunk_ids: List of chunk IDs
             labels: Array of cluster labels (-1 for outliers)
             probabilities: Optional array of cluster membership probabilities
+            cluster_names: Optional mapping from cluster ID to name/topic
+            topics: Optional mapping from cluster ID to list of (keyword, score) tuples
         
         Returns:
             Number of chunks updated
@@ -85,25 +93,47 @@ class ClusterManager:
         
         self.logger.info(f"Storing cluster labels for {len(chunk_ids)} chunks")
         
+        self.logger.info(f"Storing cluster labels for {len(chunk_ids)} chunks")
+        
         # Get existing metadata
         existing_data = self.collection.get(ids=chunk_ids, include=["metadatas"])
-        existing_metadatas = existing_data.get("metadatas", [])
+        fetched_ids = existing_data.get("ids", [])
+        fetched_metadatas = existing_data.get("metadatas", [])
         
-        # Update metadata with cluster information
+        # Create map of chunk_id -> existing_metadata
+        id_to_meta = {}
+        if fetched_ids and fetched_metadatas:
+            # Chroma might return None for metadata if it's completely empty for an item
+            # or it might return a list of Nones. Handle both.
+            for cid, meta in zip(fetched_ids, fetched_metadatas):
+                id_to_meta[cid] = meta if meta is not None else {}
+        
+        # Align metadata with input chunk_ids
         updated_metadatas = []
-        for i, (chunk_id, label, existing_meta) in enumerate(zip(chunk_ids, labels, existing_metadatas)):
-            if existing_meta is None:
-                existing_meta = {}
+        for i, chunk_id in enumerate(chunk_ids):
+            # Start with existing metadata or empty dict
+            existing_meta = id_to_meta.get(chunk_id, {})
             
             # Update with cluster info
             updated_meta = existing_meta.copy()
-            updated_meta["cluster_id"] = int(label)
+            updated_meta["cluster_id"] = int(labels[i])
             
             if probabilities is not None:
                 updated_meta["cluster_probability"] = float(probabilities[i])
             else:
                 # Default probability: 1.0 for assigned clusters, 0.0 for outliers
-                updated_meta["cluster_probability"] = 1.0 if label != -1 else 0.0
+                updated_meta["cluster_probability"] = 1.0 if labels[i] != -1 else 0.0
+                
+            if cluster_names and int(labels[i]) in cluster_names:
+                updated_meta["cluster_topic"] = cluster_names[int(labels[i])]
+            
+            if topics and int(labels[i]) in topics:
+                # Store top 10 keywords as comma-separated string
+                keywords = topics[int(labels[i])]
+                if keywords:
+                    # extract just the words
+                    keyword_strs = [k[0] for k in keywords[:10]]
+                    updated_meta["cluster_keywords"] = ", ".join(keyword_strs)
             
             updated_metadatas.append(updated_meta)
         
@@ -284,4 +314,127 @@ class ClusterManager:
         
         self.logger.info(f"Cleared cluster labels for {len(chunk_ids)} chunks")
         return len(chunk_ids)
+
+    def store_clustering_results(self, chunk_ids: List[str], result: Any) -> int:
+        """
+        Store full clustering pipeline results.
+        
+        Args:
+            chunk_ids: List of chunk IDs corresponding to the results
+            result: ClusteringResult object from pipeline
+            
+        Returns:
+            Number of chunks updated
+        """
+        return self.store_cluster_labels(
+            chunk_ids=chunk_ids,
+            labels=result.labels,
+            probabilities=result.probabilities,
+            cluster_names=result.cluster_names,
+            topics=result.topics
+        )
+
+    def load_clustering_results(self, limit: int = 5000) -> Optional[ClusteringResult]:
+        """
+        Load clustering results from ChromaDB.
+        
+        Args:
+            limit: Maximum number of documents to load to reconstruct state.
+            
+        Returns:
+            ClusteringResult object if clusters found, else None
+        """
+        self.logger.info("Attempting to load clustering results from DB...")
+        
+        # Get data with cluster info
+        # We need to filter for items that actually have a cluster_id
+        # But Chroma doesn't support "IS NOT NULL" easily in where clause for metadata fields in all versions?
+        # Let's just fetch a sample. If the user clicked "Save to DB", hopefully many chunks have it.
+        
+        # Try to find at least one chunk with cluster_id to verify existence
+        # Check if we have any clusters
+        # A quick check: count items with cluster_id != null ? 
+        # Easier to just fetch.
+        
+        sample = self.collection.get(
+            limit=limit,
+            include=["metadatas", "embeddings", "documents"]
+        )
+        
+        if not sample or not sample.get("ids"):
+            self.logger.info("No data found in collection.")
+            return None
+            
+        metadatas = sample.get("metadatas", [])
+        ids = sample.get("ids", [])
+        embeddings = sample.get("embeddings", [])
+        
+        if not metadatas:
+            return None
+            
+        # Reconstruct state
+        labels_list = []
+        probs_list = []
+        valid_indices = []
+        
+        topics: Dict[int, List[Tuple[str, float]]] = {}
+        cluster_names: Dict[int, str] = {}
+        
+        found_clusters = False
+        
+        for i, meta in enumerate(metadatas):
+            if meta and "cluster_id" in meta:
+                cid = int(meta["cluster_id"])
+                prob = float(meta.get("cluster_probability", 1.0))
+                
+                labels_list.append(cid)
+                probs_list.append(prob)
+                valid_indices.append(i)
+                found_clusters = True
+                
+                # Reconstruct topic info
+                if cid not in cluster_names and "cluster_topic" in meta:
+                    cluster_names[cid] = meta["cluster_topic"]
+                    
+                if cid not in topics and "cluster_keywords" in meta:
+                    # Parse back keywords
+                    kws = meta["cluster_keywords"].split(", ")
+                    # We lost the scores, so just assign dummy scores or descending
+                    topics[cid] = [(k, 1.0) for k in kws]
+                    
+            else:
+                # If we are loading partial state, what do we do with unclustered items?
+                # Usually noise or just not part of the set we saved.
+                # For visualization consistency, we should probably output arrays matching the FETCHED data size
+                # OR we only return the clustered subset.
+                # The ClusteringResult usually expects arrays matching the input embeddings.
+                
+                # Let's assume non-clustered items are outliers (-1) or just unassigned.
+                # If we want to fully restore the "Cluster View", we usually run it on N items.
+                labels_list.append(-1)
+                probs_list.append(0.0)
+        
+        if not found_clusters:
+            self.logger.info("No clustering metadata found in loaded sample.")
+            return None
+            
+        # Convert to numpy
+        labels = np.array(labels_list)
+        probabilities = np.array(probs_list)
+        
+        # If we have embeddings, we can reconstruct that too (useful for viz)
+        reduced_embeddings = None 
+        # Note: We don't save reduced embeddings in DB. The pipeline usually re-calculates or we just don't have them.
+        # But the Visualization tab calculates its own reduction usually. 
+        # The Clustering Pipeline RESULT might have had them.
+        
+        self.logger.info(f"Loaded clustering results for {len(labels)} chunks. Found {len(cluster_names)} named clusters.")
+        
+        return ClusteringResult(
+            labels=labels,
+            probabilities=probabilities,
+            topics=topics,
+            reduced_embeddings=reduced_embeddings,
+            cluster_names=cluster_names
+        )
 
